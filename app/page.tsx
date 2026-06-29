@@ -65,7 +65,6 @@ function getTagStyle(tag: string) {
   return TAG_STYLES[tag] ?? { bg: 'rgba(71,85,105,0.15)', color: '#94a3b8', border: 'rgba(71,85,105,0.3)' };
 }
 
-// ── Helpers ────────────────────────────────────────────────
 function timeAgo(dateStr: string): string {
   if (!dateStr) return '';
   const ms = Date.now() - new Date(dateStr).getTime();
@@ -80,7 +79,6 @@ function timeAgo(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-// ── Icons ──────────────────────────────────────────────────
 function IconRefresh({ spin }: { spin: boolean }) {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -94,20 +92,19 @@ function IconRefresh({ spin }: { spin: boolean }) {
 
 function IconSearch() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
       <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
     </svg>
   );
 }
 
-// ── Main Component ─────────────────────────────────────────
 export default function CyberWatch() {
   const [data, setData] = useState<FeedData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastFetched, setLastFetched] = useState<Date | null>(null);
   const [sourceFilter, setSourceFilter] = useState('all');
   const [tagFilter, setTagFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -120,9 +117,7 @@ export default function CyberWatch() {
     try {
       const res = await fetch('/api/news', { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setData(json);
-      setLastFetched(new Date());
+      setData(await res.json());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -139,7 +134,6 @@ export default function CyberWatch() {
     return () => clearInterval(id);
   }, [autoRefresh, fetchNews]);
 
-  // Collect all unique tags across items
   const allTags = useMemo(() => {
     if (!data) return [];
     const counts = new Map<string, number>();
@@ -175,16 +169,11 @@ export default function CyberWatch() {
       <header className="header">
         <div className="header-brand">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/favicon.svg" alt="CyberWatch logo" width={28} height={28} style={{ borderRadius: '5px', flexShrink: 0 }} />
+          <img src="/favicon.svg" alt="" width={28} height={28} style={{ borderRadius: '5px', flexShrink: 0 }} />
           <div className="header-logo">Cyber<span>Watch</span></div>
           <span className="header-subtitle">Security Intelligence Feed</span>
         </div>
         <div className="header-actions">
-          {(data?.lastRefresh || lastFetched) && (
-            <span className="last-updated">
-              Feeds refreshed {timeAgo(data?.lastRefresh ?? lastFetched!.toISOString())}
-            </span>
-          )}
           <button
             className={`btn btn-refresh${refreshing ? ' spinning' : ''}`}
             onClick={() => fetchNews(true)}
@@ -194,9 +183,9 @@ export default function CyberWatch() {
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
           <button
-            className={`btn${autoRefresh ? ' active' : ''}`}
+            className={`btn btn-auto${autoRefresh ? ' active' : ''}`}
             onClick={() => setAutoRefresh(v => !v)}
-            title="Auto-refresh every 5 minutes"
+            title="Auto-refresh every 15 minutes"
           >
             Auto {autoRefresh ? 'ON' : 'OFF'}
           </button>
@@ -205,14 +194,13 @@ export default function CyberWatch() {
 
       {/* ── Filter Bar ── */}
       <div className="filter-bar">
+        {/* Row 1: Sources */}
         <div className="filter-row">
           <span className="filter-label">Source</span>
           <button
             className={`pill${sourceFilter === 'all' ? ' active' : ''}`}
             onClick={() => setSourceFilter('all')}
-          >
-            All
-          </button>
+          >All</button>
           {(data?.sources ?? []).map(src => (
             <button
               key={src}
@@ -223,19 +211,17 @@ export default function CyberWatch() {
                 color: getSourceStyle(src).color,
                 borderColor: getSourceStyle(src).accent,
               } : {}}
-            >
-              {src}
-            </button>
+            >{src}</button>
           ))}
         </div>
+
+        {/* Row 2: Tags */}
         <div className="filter-row">
           <span className="filter-label">Tag</span>
           <button
             className={`pill${tagFilter === 'all' ? ' active' : ''}`}
             onClick={() => setTagFilter('all')}
-          >
-            All
-          </button>
+          >All</button>
           {allTags.map(tag => {
             const s = getTagStyle(tag);
             return (
@@ -244,20 +230,20 @@ export default function CyberWatch() {
                 className={`pill${tagFilter === tag ? ' active' : ''}`}
                 onClick={() => setTagFilter(tag === tagFilter ? 'all' : tag)}
                 style={tagFilter === tag ? { background: s.bg, color: s.color, borderColor: s.border } : {}}
-              >
-                {tag}
-              </button>
+              >{tag}</button>
             );
           })}
-          <div className="search-wrap" style={{ marginLeft: 'auto' }}>
-            <span style={{ color: 'var(--text-muted)' }}><IconSearch /></span>
-            <input
-              className="search-input"
-              placeholder="Search articles, CVEs…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-          </div>
+        </div>
+
+        {/* Row 3: Search (full width on all screens) */}
+        <div className="search-row">
+          <IconSearch />
+          <input
+            className="search-input"
+            placeholder="Search articles, CVEs, sources…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
         </div>
       </div>
 
@@ -270,36 +256,21 @@ export default function CyberWatch() {
           {cveCount > 0 && (
             <>
               <span>·</span>
-              <span style={{ color: '#fca5a5' }}>
-                <span className="stats-count" style={{ color: '#ef4444' }}>{cveCount}</span> with CVEs
-              </span>
+              <span><span className="stats-count" style={{ color: '#ef4444' }}>{cveCount}</span> with CVEs</span>
             </>
           )}
-          {data.fromCache && (
-            <>
-              <span>·</span>
-              <span className="live-dot">Live from DB</span>
-            </>
-          )}
-          {!data.fromCache && (
-            <>
-              <span>·</span>
-              <span className="live-dot">Live RSS</span>
-            </>
-          )}
+          <span className="live-dot">Live</span>
           {(sourceFilter !== 'all' || tagFilter !== 'all' || search) && (
             <button
               className="btn"
               style={{ padding: '2px 8px', fontSize: '10px' }}
               onClick={() => { setSourceFilter('all'); setTagFilter('all'); setSearch(''); }}
-            >
-              Clear filters
-            </button>
+            >Clear filters</button>
           )}
         </div>
       )}
 
-      {/* ── Main Content ── */}
+      {/* ── Loading ── */}
       {loading && (
         <div className="loading-wrap" style={{ marginTop: 'calc(var(--header-h) + var(--filter-h))' }}>
           <div className="spinner" />
@@ -307,6 +278,7 @@ export default function CyberWatch() {
         </div>
       )}
 
+      {/* ── Error ── */}
       {error && !loading && (
         <div className="error-wrap" style={{ marginTop: 'calc(var(--header-h) + var(--filter-h))' }}>
           <span style={{ fontSize: '24px' }}>⚠</span>
@@ -315,6 +287,7 @@ export default function CyberWatch() {
         </div>
       )}
 
+      {/* ── Empty ── */}
       {!loading && !error && filteredItems.length === 0 && (
         <div className="empty-wrap" style={{ marginTop: 'calc(var(--header-h) + var(--filter-h))' }}>
           <span style={{ fontSize: '24px' }}>🔍</span>
@@ -325,6 +298,7 @@ export default function CyberWatch() {
         </div>
       )}
 
+      {/* ── Articles ── */}
       {!loading && !error && filteredItems.length > 0 && (
         <main className="news-grid">
           {filteredItems.map(item => {
@@ -335,35 +309,22 @@ export default function CyberWatch() {
                 className="news-card"
                 style={{ '--source-color': srcStyle.accent } as React.CSSProperties}
               >
-                {/* Card header */}
                 <div className="card-header">
-                  <span
-                    className="source-badge"
-                    style={{ background: srcStyle.bg, color: srcStyle.color }}
-                  >
+                  <span className="source-badge" style={{ background: srcStyle.bg, color: srcStyle.color }}>
                     {item.source}
                   </span>
                   <div className="card-meta">
                     <span className="time-ago">{timeAgo(item.pubDate)}</span>
-                    <a
-                      className="read-link"
-                      href={item.link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
+                    <a className="read-link" href={item.link} target="_blank" rel="noopener noreferrer">
                       Read ↗
                     </a>
                   </div>
                 </div>
 
-                {/* Title */}
                 <h2 className="card-title">
-                  <a href={item.link} target="_blank" rel="noopener noreferrer">
-                    {item.title}
-                  </a>
+                  <a href={item.link} target="_blank" rel="noopener noreferrer">{item.title}</a>
                 </h2>
 
-                {/* CVE badges */}
                 {item.cves.length > 0 && (
                   <div className="cve-badges">
                     {item.cves.slice(0, 4).map(cve => (
@@ -372,12 +333,10 @@ export default function CyberWatch() {
                   </div>
                 )}
 
-                {/* Description */}
                 {item.description && (
                   <p className="card-description">{item.description}</p>
                 )}
 
-                {/* Tags */}
                 {item.tags.length > 0 && (
                   <div className="card-tags">
                     {item.tags.map(tag => {
@@ -388,9 +347,7 @@ export default function CyberWatch() {
                           className="tag"
                           style={{ background: ts.bg, color: ts.color, borderColor: ts.border, cursor: 'pointer' }}
                           onClick={() => setTagFilter(tag === tagFilter ? 'all' : tag)}
-                        >
-                          {tag}
-                        </span>
+                        >{tag}</span>
                       );
                     })}
                   </div>
