@@ -48,9 +48,9 @@ function truncate(text, limit) {
   if (text.length <= limit) return text;
   const slice = text.slice(0, limit);
   const lastSentence = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('! '), slice.lastIndexOf('? '));
-  if (lastSentence > limit * 0.5) return slice.slice(0, lastSentence + 1);
+  if (lastSentence > limit * 0.5) return slice.slice(0, lastSentence + 1).trimEnd() + '...';
   const lastSpace = slice.lastIndexOf(' ');
-  return (lastSpace > 0 ? slice.slice(0, lastSpace) : slice) + '…';
+  return (lastSpace > 0 ? slice.slice(0, lastSpace) : slice) + '...';
 }
 
 function detectTags(title, description) {
