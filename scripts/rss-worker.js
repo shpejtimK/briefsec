@@ -71,7 +71,7 @@ function extractCVEs(text) {
 }
 
 function openDatabase() {
-  const dbPath = path.join(__dirname, '..', 'db', 'cyberwatch.sqlite');
+  const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '..', 'db', 'cyberwatch.sqlite');
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.exec(`

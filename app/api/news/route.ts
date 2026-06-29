@@ -93,7 +93,7 @@ function extractCVEs(text: string): string[] {
 function openDb() {
   try {
     const Database = require('better-sqlite3');
-    const dbPath = path.join(process.cwd(), 'db', 'cyberwatch.sqlite');
+    const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'db', 'cyberwatch.sqlite');
     const db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
     db.exec(`
