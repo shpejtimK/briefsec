@@ -26,8 +26,4 @@
     "eslint-config-next": "^14.0.0",
     "typescript": "^5.0.0"
   },
-  "allowScripts": {
-    "better-sqlite3@12.11.1": true,
-    "unrs-resolver@1.12.2": true
-  }
 }
