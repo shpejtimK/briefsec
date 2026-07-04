@@ -1093,9 +1093,465 @@ html.light .ioc-panel { background: rgba(0, 0, 0, 0.04); }
 
 .error-msg { color: var(--red); font-size: 13px; }
 
+/* ─── Threat Level Badge ──────────────────────────────────── */
+.threat-level-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  border: 1px solid;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ─── Stack / CVE Tab Overrides ───────────────────────────── */
+.stack-tab.active {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.45);
+  color: #34d399;
+}
+
+.cve-tab.active {
+  background: rgba(234, 179, 8, 0.1);
+  border-color: rgba(234, 179, 8, 0.4);
+  color: #fde047;
+}
+
+/* ─── MISP Export Button ──────────────────────────────────── */
+.btn-misp {
+  background: rgba(75, 10, 70, 0.2);
+  border-color: rgba(180, 0, 170, 0.35);
+  color: #e879f9;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.btn-misp:hover {
+  background: rgba(75, 10, 70, 0.35);
+  border-color: rgba(180, 0, 170, 0.6);
+  color: #f0abfc;
+}
+
+/* ─── IOC chip row (chip + SPL button) ────────────────────── */
+.ioc-chip-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ioc-spl-btn {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  background: rgba(99, 102, 241, 0.08);
+  color: #a5b4fc;
+  cursor: pointer;
+  transition: all 0.1s;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+
+.ioc-spl-btn:hover {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: rgba(99, 102, 241, 0.55);
+  color: #c7d2fe;
+}
+
+/* ─── CVE badge wrapper (chip + SPL btn + CVSS inline) ───── */
+.cve-badge-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cve-spl-btn {
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  background: rgba(99, 102, 241, 0.07);
+  color: #a5b4fc;
+  cursor: pointer;
+  transition: all 0.1s;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.cve-spl-btn:hover {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.cvss-inline {
+  font-weight: 800;
+  font-size: 9px;
+  vertical-align: text-top;
+}
+
+/* ─── Threat Actor Spotlight ──────────────────────────────── */
+.actor-section {
+  margin: 0 20px 10px;
+  padding: 9px 14px;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 10px;
+  background: rgba(245, 158, 11, 0.03);
+}
+
+.actor-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fbbf24;
+  letter-spacing: 0.3px;
+  margin-bottom: 8px;
+}
+
+.actor-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.actor-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  background: rgba(245, 158, 11, 0.06);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.actor-chip:hover {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.actor-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fde68a;
+  white-space: nowrap;
+}
+
+.actor-count {
+  font-size: 10px;
+  font-weight: 700;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.15);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.actor-origin {
+  font-size: 9px;
+  color: #92400e;
+  white-space: nowrap;
+}
+
+/* ─── Trends View ─────────────────────────────────────────── */
+.trends-view {
+  margin-top: calc(var(--header-h) + var(--filter-h) + 10px);
+  padding: 0 20px 48px;
+  max-width: 900px;
+}
+
+.trends-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.trends-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.trends-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 3px;
+}
+
+.trends-chart-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.trends-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.trends-stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  text-align: center;
+}
+
+.trends-stat-card.sev-critical { border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.04); }
+.trends-stat-card.sev-high     { border-color: rgba(249,115,22,0.3); background: rgba(249,115,22,0.04); }
+.trends-stat-card.sev-medium   { border-color: rgba(234,179,8,0.2);  background: rgba(234,179,8,0.03);  }
+.trends-stat-card.sev-low      { border-color: var(--border); }
+
+.trends-stat-num {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.trends-stat-card.sev-critical .trends-stat-num { color: #ef4444; }
+.trends-stat-card.sev-high .trends-stat-num     { color: #f97316; }
+.trends-stat-card.sev-medium .trends-stat-num   { color: #eab308; }
+.trends-stat-card.sev-low .trends-stat-num      { color: #64748b; }
+
+.trends-stat-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.trends-actors {
+  margin-top: 20px;
+}
+
+.trends-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+  letter-spacing: 0.3px;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+}
+
+/* ─── CVE Tracker View ────────────────────────────────────── */
+.cve-tracker-view {
+  margin-top: calc(var(--header-h) + var(--filter-h) + 10px);
+  padding: 0 20px 48px;
+}
+
+.cve-tracker-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.cve-tracker-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.cve-tracker-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: block;
+  margin-top: 2px;
+}
+
+.cve-product-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.cve-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.cve-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.cve-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.cve-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.cve-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.cve-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(26, 33, 64, 0.5);
+  vertical-align: middle;
+  color: var(--text-dim);
+}
+
+.cve-table tbody tr:last-child td { border-bottom: none; }
+
+.cve-row:hover td { background: rgba(255,255,255,0.02); }
+
+.cve-row-kev { border-left: 3px solid rgba(255, 51, 102, 0.6); }
+.cve-row-kev td:first-child { padding-left: 9px; }
+
+.cve-id-link {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #93c5fd;
+  text-decoration: none;
+  display: block;
+  white-space: nowrap;
+}
+
+.cve-id-link:hover { color: var(--accent); text-decoration: underline; }
+
+.cve-splunk-btn {
+  display: inline-block;
+  margin-top: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  background: rgba(99, 102, 241, 0.08);
+  color: #a5b4fc;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.cve-splunk-btn:hover {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.55);
+}
+
+.cvss-score-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 800;
+  border: 1px solid;
+  background: rgba(0,0,0,0.2);
+  white-space: nowrap;
+  font-family: 'Courier New', monospace;
+}
+
+.cve-product-tag {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(14, 165, 233, 0.1);
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  color: #7dd3fc;
+  white-space: nowrap;
+}
+
+.cve-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-family: 'Courier New', monospace;
+}
+
+.cve-status-select {
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid rgba(255,255,255,0.1);
+  cursor: pointer;
+  outline: none;
+  transition: all 0.12s;
+  min-width: 110px;
+}
+
+.cve-status-select option {
+  background: #0d1124;
+  color: #e2e8f0;
+}
+
+.cve-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  max-width: 340px;
+  line-height: 1.45;
+}
+
+.cve-sort-select {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.12s;
+}
+
+.cve-sort-select:hover { border-color: var(--accent-border); }
+
 /* ─── Mobile ──────────────────────────────────────────────── */
 @media (max-width: 900px) {
   .threat-strip { display: none; }
+  .trends-stats { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 640px) {
@@ -1110,6 +1566,7 @@ html.light .ioc-panel { background: rgba(0, 0, 0, 0.04); }
   .btn-auto { display: none; }
   .btn { padding: 7px 10px; font-size: 11px; }
   .btn-export span { display: none; }
+  .btn-misp { display: none; }
 
   .filter-bar { padding: 6px 14px; gap: 4px; }
   .pill { padding: 3px 9px; font-size: 10px; }
@@ -1130,4 +1587,8 @@ html.light .ioc-panel { background: rgba(0, 0, 0, 0.04); }
   .source-badge { max-width: 110px; }
   .threat-strip { display: none; }
   .filter-right-group { gap: 4px; }
+
+  .trends-view, .cve-tracker-view { padding: 0 12px 48px; }
+  .cve-table th, .cve-table td { padding: 6px 8px; }
+  .cve-desc { max-width: 200px; }
 }
