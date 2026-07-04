@@ -93,7 +93,7 @@ function extractCVEs(text) {
 }
 
 function openDatabase() {
-  const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '..', 'db', 'cyberwatch.sqlite');
+  const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '..', 'db', 'briefsec.sqlite');
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.exec(`
@@ -185,7 +185,7 @@ async function ingestFeed(db, feedConfig) {
 }
 
 async function run() {
-  console.log(`\n[CyberWatch RSS Worker] ${new Date().toISOString()}`);
+  console.log(`\n[BriefSec RSS Worker] ${new Date().toISOString()}`);
   const db = openDatabase();
   let total = 0;
   for (const feed of RSS_FEEDS) {

@@ -271,7 +271,7 @@ The browser page auto-refreshes every 15 minutes. If new CRITICAL articles arriv
                 └────────────────────────────┬────────────┘
                                              │
                                ┌─────────────▼──────────────┐
-                               │      cyberwatch.sqlite       │
+                               │      briefsec.sqlite       │
                                │                              │
                                │  articles          (750 max) │
                                │  cve_tracker_cache  (12h)   │
@@ -325,7 +325,7 @@ briefsec/
 ├── scripts/
 │   └── rss-worker.js              # Standalone ingestion script (optional background job)
 ├── db/
-│   └── cyberwatch.sqlite          # Auto-created on first run (gitignored)
+│   └── briefsec.sqlite          # Auto-created on first run (gitignored)
 └── package.json
 ```
 
@@ -371,7 +371,7 @@ npm start
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `DATABASE_PATH` | `db/cyberwatch.sqlite` | Absolute path to SQLite file |
+| `DATABASE_PATH` | `db/briefsec.sqlite` | Absolute path to SQLite file |
 | `PORT` | `63337` | HTTP port |
 
 ---

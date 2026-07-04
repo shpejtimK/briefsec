@@ -8,7 +8,7 @@ const CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
 function openDb() {
   try {
     const Database = require('better-sqlite3');
-    const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'db', 'cyberwatch.sqlite');
+    const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'db', 'briefsec.sqlite');
     const db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
     db.exec(`
