@@ -18,6 +18,10 @@ const RSS_FEEDS = [
   { url: 'https://www.troyhunt.com/rss/', name: 'Troy Hunt' },
   { url: 'https://securityweek.com/feed/', name: 'SecurityWeek' },
   { url: 'https://www.darkreading.com/rss.xml', name: 'Dark Reading' },
+  // Vendor advisories and government CERTs
+  { url: 'https://api.msrc.microsoft.com/update-guide/rss', name: 'Microsoft MSRC' },
+  { url: 'https://www.cert.at/de/warnungen/rss/', name: 'CERT.at' },
+  { url: 'https://www.enisa.europa.eu/publications/security-advisories/rss', name: 'ENISA' },
 ];
 
 const parser = new Parser({
@@ -71,6 +75,15 @@ function detectTags(title, description) {
   if (/\bcloud\b|\baws\b|\bazure\b|\bgcp\b|\bkubernetes\b|\bdocker\b/.test(text)) tags.push('Cloud');
   if (/privacy|\bgdpr\b|\bccpa\b|data protect/.test(text)) tags.push('Privacy');
   if (/\bcritical infrastructure\b|ics\b|\bscada\b|\bots\b/.test(text)) tags.push('ICS/OT');
+  // Stack-specific relevance tags
+  if (/azure.?ad|azure.?active.?directory|entra.?id|microsoft.?entra/.test(text)) tags.push('Azure AD');
+  if (/\bsplunk\b/.test(text)) tags.push('Splunk');
+  if (/netscaler|citrix.*(adc|gateway|ica|bleed)|citrix.*(vuln|exploit|advis|patch)/.test(text)) tags.push('NetScaler');
+  if (/big.?ip|f5.*(vuln|exploit|advis|patch|security)|f5.?labs/.test(text)) tags.push('F5/BIG-IP');
+  if (/microsoft.?365|office.?365|\bo365\b|sharepoint.?online|exchange.?online|microsoft.?teams|outlook.?online/.test(text)) tags.push('M365');
+  if (/windows.?server|active.?directory|domain.?controller|\bkerberos\b|group.?policy|\bntlm\b/.test(text)) tags.push('Windows/AD');
+  if (/financial.*(sector|institution|service|attack|fraud|crime)|banking.*(security|threat|fraud)|pci.?dss|\bswift\b.*network|payment.?card.*fraud|financial.?market/.test(text)) tags.push('Financial Sector');
+  if (/\bdora\b|digital.?operational.?resilience|\bnis2\b|nis.?2.?directive|financial.*(authorit|regulat)|cyber.?resilience.?act|regulatory.*(framework|compliance|mandate)/.test(text)) tags.push('Regulatory');
   return tags;
 }
 
@@ -179,8 +192,8 @@ async function run() {
     total += await ingestFeed(db, feed);
   }
 
-  // Trim old articles beyond 500
-  db.prepare(`DELETE FROM articles WHERE id NOT IN (SELECT id FROM articles ORDER BY published_at DESC LIMIT 500)`).run();
+  // Trim old articles beyond 750 (increased for additional feeds)
+  db.prepare(`DELETE FROM articles WHERE id NOT IN (SELECT id FROM articles ORDER BY published_at DESC LIMIT 750)`).run();
   db.close();
   console.log(`[Done] Total new: ${total}`);
 }

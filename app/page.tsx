@@ -56,6 +56,9 @@ const SOURCE_STYLES: Record<string, { bg: string; color: string; accent: string 
   'Ars Technica Security': { bg: '#0c0a2e', color: '#a5b4fc', accent: '#6366f1' },
   'Naked Security':        { bg: '#022033', color: '#7dd3fc', accent: '#0284c7' },
   'Troy Hunt':             { bg: '#1a0530', color: '#e9d5ff', accent: '#9333ea' },
+  'Microsoft MSRC':        { bg: '#031630', color: '#90c8f0', accent: '#0078d4' },
+  'CERT.at':               { bg: '#001a10', color: '#6ee7b7', accent: '#059669' },
+  'ENISA':                 { bg: '#030d2c', color: '#93c5fd', accent: '#1d4ed8' },
 };
 
 const TAG_STYLES: Record<string, { bg: string; color: string; border: string }> = {
@@ -74,6 +77,15 @@ const TAG_STYLES: Record<string, { bg: string; color: string; border: string }> 
   'Cloud':          { bg: 'rgba(14,165,233,0.10)',  color: '#7dd3fc', border: 'rgba(14,165,233,0.3)' },
   'Privacy':        { bg: 'rgba(16,185,129,0.10)',  color: '#6ee7b7', border: 'rgba(16,185,129,0.3)' },
   'ICS/OT':         { bg: 'rgba(234,88,12,0.10)',   color: '#fdba74', border: 'rgba(234,88,12,0.3)' },
+  // FMA/SOC stack tags
+  'Azure AD':        { bg: 'rgba(0,120,212,0.12)',  color: '#90c8f0', border: 'rgba(0,120,212,0.4)' },
+  'Splunk':          { bg: 'rgba(107,63,160,0.12)', color: '#d4a8ff', border: 'rgba(107,63,160,0.4)' },
+  'NetScaler':       { bg: 'rgba(0,166,255,0.10)',  color: '#67d4ff', border: 'rgba(0,166,255,0.35)' },
+  'F5/BIG-IP':       { bg: 'rgba(230,74,25,0.10)',  color: '#ffb08a', border: 'rgba(230,74,25,0.3)' },
+  'M365':            { bg: 'rgba(0,120,212,0.08)',  color: '#81b4ea', border: 'rgba(0,120,212,0.3)' },
+  'Windows/AD':      { bg: 'rgba(0,164,239,0.10)',  color: '#7dd3fc', border: 'rgba(0,164,239,0.3)' },
+  'Financial Sector':{ bg: 'rgba(16,185,129,0.10)', color: '#34d399', border: 'rgba(16,185,129,0.3)' },
+  'Regulatory':      { bg: 'rgba(245,158,11,0.08)', color: '#fbbf24', border: 'rgba(245,158,11,0.25)' },
 };
 
 // ─── MITRE ATT&CK Mapping ─────────────────────────────────────────────────────
@@ -350,6 +362,17 @@ function IconDownload() {
   );
 }
 
+function IconPin({ filled }: { filled: boolean }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24"
+      fill={filled ? 'currentColor' : 'none'}
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="17" x2="12" y2="22" />
+      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+    </svg>
+  );
+}
+
 // ─── SEV Helper ───────────────────────────────────────────────────────────────
 
 const SEV_CSS_VAR: Record<Severity, string> = {
@@ -377,7 +400,7 @@ export default function BriefSec() {
   const [tagFilter, setTagFilter] = useState('all');
   const [sevFilter, setSevFilter] = useState<'ALL' | Severity>('ALL');
   const [search, setSearch] = useState('');
-  const [timeFilter, setTimeFilter] = useState<'all' | '24h'>('all');
+  const [timeFilter, setTimeFilter] = useState<'all' | '7d' | '24h'>('all');
   const [sortBy, setSortBy] = useState<SortBy>('newest');
 
   // ── UI state ─────────────────────────────────────────────────
@@ -388,6 +411,8 @@ export default function BriefSec() {
   const [lastVisit, setLastVisit] = useState<number>(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [pinnedArticles, setPinnedArticles] = useState<Map<string, NewsItem>>(new Map());
+  const [critWeekExpanded, setCritWeekExpanded] = useState(true);
 
   const prevCriticalIds = useRef<Set<string>>(new Set());
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -409,6 +434,14 @@ export default function BriefSec() {
     const prev = storedVisit ? parseInt(storedVisit, 10) : 0;
     setLastVisit(prev);
     localStorage.setItem('briefsec-last-visit', String(Date.now()));
+
+    const rawPinned = localStorage.getItem('briefsec-pinned');
+    if (rawPinned) {
+      try {
+        const obj = JSON.parse(rawPinned) as Record<string, NewsItem>;
+        setPinnedArticles(new Map(Object.entries(obj)));
+      } catch { /* ignore */ }
+    }
   }, []);
 
   // ── Theme ────────────────────────────────────────────────────
@@ -505,6 +538,18 @@ export default function BriefSec() {
     [data, lastVisit]
   );
 
+  // ── Critical This Week (always from full dataset, unfiltered) ─
+  const criticalThisWeek = useMemo(() => {
+    if (!data) return [];
+    const cutoff = Date.now() - 7 * 86_400_000;
+    return data.items
+      .filter(i => {
+        const t = new Date(i.pubDate).getTime();
+        return t > cutoff && computeSeverity(i, kevSet).level === 'CRITICAL';
+      })
+      .slice(0, 8);
+  }, [data, kevSet]);
+
   // ── Filtered items ───────────────────────────────────────────
   const filteredItems = useMemo(() => {
     if (viewMode === 'saved') {
@@ -524,8 +569,9 @@ export default function BriefSec() {
     if (sevFilter !== 'ALL') items = items.filter(i => computeSeverity(i, kevSet).level === sevFilter);
 
     if (timeFilter === '24h') {
-      const cutoff = Date.now() - 86_400_000;
-      items = items.filter(i => new Date(i.pubDate).getTime() > cutoff);
+      items = items.filter(i => new Date(i.pubDate).getTime() > Date.now() - 86_400_000);
+    } else if (timeFilter === '7d') {
+      items = items.filter(i => new Date(i.pubDate).getTime() > Date.now() - 7 * 86_400_000);
     }
 
     if (search.trim()) {
@@ -566,6 +612,18 @@ export default function BriefSec() {
   const hasActiveFilters = sourceFilter !== 'all' || tagFilter !== 'all' || search.trim() !== '' || timeFilter !== 'all' || sevFilter !== 'ALL';
 
   // ── Handlers ─────────────────────────────────────────────────
+  const togglePin = useCallback((item: NewsItem) => {
+    setPinnedArticles(prev => {
+      const next = new Map(prev);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.set(item.id, item);
+      const obj: Record<string, NewsItem> = {};
+      next.forEach((v, k) => { obj[k] = v; });
+      localStorage.setItem('briefsec-pinned', JSON.stringify(obj));
+      return next;
+    });
+  }, []);
+
   const toggleSave = useCallback((item: NewsItem) => {
     setSavedArticles(prev => {
       const next = new Map(prev);
@@ -713,7 +771,9 @@ export default function BriefSec() {
           <div className="filter-right-group">
             <div className="time-tabs">
               <button className={`view-tab${timeFilter === 'all' ? ' active' : ''}`}
-                onClick={() => setTimeFilter('all')}>All time</button>
+                onClick={() => setTimeFilter('all')}>All</button>
+              <button className={`view-tab${timeFilter === '7d' ? ' active' : ''}`}
+                onClick={() => setTimeFilter('7d')}>7d</button>
               <button className={`view-tab${timeFilter === '24h' ? ' active' : ''}`}
                 onClick={() => setTimeFilter('24h')}>24h</button>
             </div>
@@ -825,6 +885,73 @@ export default function BriefSec() {
         </div>
       )}
 
+      {/* ── Critical This Week ── */}
+      {!loading && viewMode === 'feed' && criticalThisWeek.length > 0 && (
+        <div className="crit-week-section">
+          <button className="crit-week-header" onClick={() => setCritWeekExpanded(v => !v)}>
+            <span>🔴 Critical This Week</span>
+            <span className="crit-week-count">{criticalThisWeek.length}</span>
+            <span className="crit-week-toggle">{critWeekExpanded ? '▲' : '▼'}</span>
+          </button>
+          {critWeekExpanded && (
+            <div className="crit-week-list">
+              {criticalThisWeek.map(item => {
+                const sev = computeSeverity(item, kevSet);
+                return (
+                  <a key={item.id} href={item.link} target="_blank" rel="noopener noreferrer"
+                     className="crit-week-item">
+                    {sev.isKev && <span className="crit-week-kev-badge">KEV</span>}
+                    <span className="crit-week-title">{item.title}</span>
+                    <span className="crit-week-meta">
+                      {item.source} · {timeAgo(item.pubDate)}
+                      {item.cves.length > 0 && (
+                        <span className="crit-week-cve"> · {item.cves[0]}{item.cves.length > 1 ? ` +${item.cves.length - 1}` : ''}</span>
+                      )}
+                    </span>
+                  </a>
+                );
+              })}
+              <button className="crit-week-viewall"
+                onClick={() => { setSevFilter('CRITICAL'); setTimeFilter('7d'); }}>
+                View all {criticalThisWeek.length} critical this week →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Pinned Articles ── */}
+      {!loading && viewMode === 'feed' && pinnedArticles.size > 0 && (
+        <div className="pinned-section">
+          <div className="pinned-section-header">
+            <span>📌 Pinned ({pinnedArticles.size})</span>
+          </div>
+          <div className="pinned-list">
+            {[...pinnedArticles.values()].map(item => {
+              const srcStyle = getSourceStyle(item.source);
+              const sev = computeSeverity(item, kevSet);
+              return (
+                <div key={item.id} className="pinned-item">
+                  <span className={`sev-badge sev-badge-${sev.level.toLowerCase()}`}>
+                    {sev.level === 'CRITICAL' ? 'CRIT' : sev.level}
+                  </span>
+                  <span className="source-badge" style={{ background: srcStyle.bg, color: srcStyle.color }}>
+                    {item.source}
+                  </span>
+                  <a href={item.link} target="_blank" rel="noopener noreferrer" className="pinned-item-title">
+                    {item.title}
+                  </a>
+                  <span className="pinned-item-meta">{timeAgo(item.pubDate)}</span>
+                  <button className="btn-pin active" onClick={() => togglePin(item)} title="Unpin">
+                    <IconPin filled={true} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── Loading ── */}
       {loading && (
         <div className="loading-wrap" style={{ marginTop: 'calc(var(--header-h) + var(--filter-h))' }}>
@@ -908,6 +1035,11 @@ export default function BriefSec() {
                       onClick={() => toggleSave(item)}
                       title={isSaved ? 'Remove from saved' : 'Save article'}>
                       <IconBookmark filled={isSaved} />
+                    </button>
+                    <button className={`btn-pin${pinnedArticles.has(item.id) ? ' active' : ''}`}
+                      onClick={() => togglePin(item)}
+                      title={pinnedArticles.has(item.id) ? 'Unpin' : 'Pin to top'}>
+                      <IconPin filled={pinnedArticles.has(item.id)} />
                     </button>
                     <a className="read-link" href={item.link} target="_blank" rel="noopener noreferrer">
                       Read ↗
