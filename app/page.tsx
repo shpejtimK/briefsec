@@ -1,17 +1,36 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface NewsItem {
   id: string;
   title: string;
   link: string;
   description: string;
+  content: string;
   pubDate: string;
   source: string;
   tags: string[];
   cves: string[];
   author: string;
+}
+
+type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+type SortBy = 'newest' | 'severity';
+type ViewMode = 'feed' | 'saved' | 'kev';
+
+interface SeverityResult { level: Severity; isKev: boolean; }
+interface IOCResult { ips: string[]; hashes: string[]; domains: string[]; }
+interface AttackTechnique { id: string; name: string; }
+
+interface EnrichedItem {
+  item: NewsItem;
+  severity: SeverityResult;
+  iocs: IOCResult;
+  techniques: AttackTechnique[];
+  isNew: boolean;
 }
 
 interface FeedData {
@@ -21,6 +40,8 @@ interface FeedData {
   fromCache: boolean;
   lastRefresh: string | null;
 }
+
+// ─── Source & Tag Styles (unchanged) ─────────────────────────────────────────
 
 const SOURCE_STYLES: Record<string, { bg: string; color: string; accent: string }> = {
   'Krebs on Security':     { bg: '#2d1206', color: '#fb923c', accent: '#ea580c' },
@@ -55,6 +76,36 @@ const TAG_STYLES: Record<string, { bg: string; color: string; border: string }> 
   'ICS/OT':         { bg: 'rgba(234,88,12,0.10)',   color: '#fdba74', border: 'rgba(234,88,12,0.3)' },
 };
 
+// ─── MITRE ATT&CK Mapping ─────────────────────────────────────────────────────
+
+const ATTACK_MAP: Array<{ pattern: RegExp; id: string; name: string }> = [
+  { pattern: /phish|spear.?phish/i,                           id: 'T1566', name: 'Phishing' },
+  { pattern: /supply chain|dependency confus|typosquat/i,      id: 'T1195', name: 'Supply Chain' },
+  { pattern: /ransomware/i,                                    id: 'T1486', name: 'Data Encrypted' },
+  { pattern: /credential.?stuff|brute.?force|password.?spray/i, id: 'T1110', name: 'Brute Force' },
+  { pattern: /remote code exec|\brce\b/i,                      id: 'T1059', name: 'Code Execution' },
+  { pattern: /sql inject/i,                                    id: 'T1190', name: 'Exploit Public App' },
+  { pattern: /zero.?day|0day/i,                                id: 'T1203', name: 'Client Exploit' },
+  { pattern: /backdoor|webshell|web shell/i,                   id: 'T1505', name: 'Server Component' },
+  { pattern: /privilege.escalat|\beop\b/i,                     id: 'T1068', name: 'Priv Escalation' },
+  { pattern: /exfiltrat|data theft|stolen.?data/i,             id: 'T1041', name: 'Exfiltration' },
+  { pattern: /command.and.control|\bc2\b|\bc&c\b|beacon/i,     id: 'T1071', name: 'C2 Protocol' },
+  { pattern: /pass.the.hash|kerberoast|lateral movement/i,     id: 'T1550', name: 'Alt Auth Material' },
+  { pattern: /defense.evasion|obfuscat/i,                      id: 'T1027', name: 'Obfuscation' },
+  { pattern: /watering.hole/i,                                 id: 'T1189', name: 'Drive-by' },
+  { pattern: /living.off.the.land|lolbin|lolbas/i,             id: 'T1218', name: 'Signed Binary' },
+];
+
+// ─── Severity Patterns ────────────────────────────────────────────────────────
+
+const CRIT_KEYWORDS =
+  /actively exploit|exploited in the wild|emergency.?patch|weaponized|wormable|mass exploitation|under.?attack/i;
+
+const HIGH_KEYWORDS =
+  /\brce\b|remote code exec|unauthenticated|pre.?auth|privilege escalat|arbitrary code|critical.?vuln/i;
+
+// ─── Helper Functions ─────────────────────────────────────────────────────────
+
 function getSourceStyle(source: string) {
   return SOURCE_STYLES[source] ?? { bg: '#0d1124', color: '#94a3b8', accent: '#475569' };
 }
@@ -76,6 +127,166 @@ function timeAgo(dateStr: string): string {
   if (days < 7) return `${days}d ago`;
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
+
+function computeSeverity(item: NewsItem, kevSet: Set<string>): SeverityResult {
+  const isKev = item.cves.some(c => kevSet.has(c));
+  if (isKev) return { level: 'CRITICAL', isKev: true };
+
+  const text = `${item.title} ${item.description}`;
+
+  if (item.tags.includes('Zero-Day') && item.cves.length > 0) return { level: 'CRITICAL', isKev: false };
+  if (item.tags.includes('Zero-Day') && item.tags.includes('Ransomware')) return { level: 'CRITICAL', isKev: false };
+  if (CRIT_KEYWORDS.test(text)) return { level: 'CRITICAL', isKev: false };
+  if (item.source === 'CISA' && item.tags.includes('Vulnerability')) return { level: 'CRITICAL', isKev: false };
+
+  if (item.tags.includes('Zero-Day')) return { level: 'HIGH', isKev: false };
+  if (item.tags.includes('Ransomware')) return { level: 'HIGH', isKev: false };
+  if (item.tags.includes('APT') || item.tags.includes('Nation-State')) return { level: 'HIGH', isKev: false };
+  if (item.tags.includes('ICS/OT') && item.cves.length > 0) return { level: 'HIGH', isKev: false };
+  if (item.tags.includes('Supply Chain') && item.tags.includes('Vulnerability')) return { level: 'HIGH', isKev: false };
+  if (item.cves.length > 0 && HIGH_KEYWORDS.test(text)) return { level: 'HIGH', isKev: false };
+  if (item.tags.includes('CVE') && item.tags.includes('Vulnerability')) return { level: 'HIGH', isKev: false };
+  if (item.tags.includes('Breach') && /million|records|users|customers/i.test(text)) return { level: 'HIGH', isKev: false };
+
+  if (item.cves.length > 0) return { level: 'MEDIUM', isKev: false };
+  if (item.tags.includes('Vulnerability')) return { level: 'MEDIUM', isKev: false };
+  if (item.tags.includes('Malware')) return { level: 'MEDIUM', isKev: false };
+  if (item.tags.includes('Phishing')) return { level: 'MEDIUM', isKev: false };
+  if (item.tags.includes('Breach')) return { level: 'MEDIUM', isKev: false };
+  if (item.tags.includes('Patch Tuesday')) return { level: 'MEDIUM', isKev: false };
+
+  return { level: 'LOW', isKev: false };
+}
+
+function detectTechniques(text: string): AttackTechnique[] {
+  const seen = new Set<string>();
+  const out: AttackTechnique[] = [];
+  for (const { pattern, id, name } of ATTACK_MAP) {
+    if (!seen.has(id) && pattern.test(text)) {
+      seen.add(id);
+      out.push({ id, name });
+    }
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+
+function extractIOCs(text: string): IOCResult {
+  const t = text.replace(/\[\.]/g, '.').replace(/hxxp/gi, 'http');
+
+  const rawIPs = (t.match(/\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\b/g) || []);
+  const ips = [...new Set(rawIPs)]
+    .filter(ip => !/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|0\.|255\.|169\.254\.)/.test(ip))
+    .slice(0, 10);
+
+  const sha256 = [...new Set((t.match(/\b[0-9a-fA-F]{64}\b/g) || []).map(h => h.toLowerCase()))];
+  const sha1   = [...new Set((t.match(/\b[0-9a-fA-F]{40}\b/g) || []).map(h => h.toLowerCase()))];
+  const md5    = [...new Set((t.match(/\b[0-9a-fA-F]{32}\b/g) || []).map(h => h.toLowerCase()))];
+  const hashes = [...sha256, ...sha1, ...md5].slice(0, 8);
+
+  const domains = [...new Set(
+    (t.match(/\b(?:[a-zA-Z0-9-]+\.)+(?:onion|ru|cn|tk|ml|ga|cf|gq|pw|xyz|top|club|online|site|info|biz)\b/g) || [])
+  )].slice(0, 6);
+
+  return { ips, hashes, domains };
+}
+
+async function copyToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const el = document.createElement('textarea');
+    el.value = text;
+    Object.assign(el.style, { position: 'fixed', opacity: '0', top: '0', left: '0' });
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+  }
+}
+
+function generateBrief(items: NewsItem[], kevSet: Set<string>): string {
+  const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  const ts = new Date().toUTCString();
+
+  const enriched = items.map(i => ({ item: i, sev: computeSeverity(i, kevSet) }));
+  const critical = enriched.filter(e => e.sev.level === 'CRITICAL');
+  const high = enriched.filter(e => e.sev.level === 'HIGH');
+
+  const allCVEs = [...new Set(items.flatMap(i => i.cves))];
+  const kevCVEs = allCVEs.filter(c => kevSet.has(c));
+  const allIPs = [...new Set(critical.concat(high).flatMap(e => extractIOCs(`${e.item.description} ${e.item.content}`).ips))];
+  const allHashes = [...new Set(critical.concat(high).flatMap(e => extractIOCs(`${e.item.description} ${e.item.content}`).hashes))];
+
+  const lines: string[] = [
+    `# BriefSec SOC Daily Brief`,
+    `**Date:** ${date}`,
+    `**Generated:** ${ts}`,
+    `**Articles:** ${items.length} | **CRITICAL:** ${critical.length} | **HIGH:** ${high.length} | **CVEs:** ${allCVEs.length}`,
+    ``,
+    `---`,
+    ``,
+    `## 🔴 CRITICAL Alerts (${critical.length})`,
+    ``,
+  ];
+
+  for (const { item, sev } of critical) {
+    lines.push(`### ${item.title}`);
+    lines.push(`- **Source:** ${item.source} · ${timeAgo(item.pubDate)}`);
+    lines.push(`- **Link:** <${item.link}>`);
+    if (sev.isKev) lines.push(`- **⚠ CISA KEV:** Confirmed exploited in the wild — patch immediately`);
+    if (item.cves.length > 0) {
+      const cveLinks = item.cves.map(c => `[${c}](https://nvd.nist.gov/vuln/detail/${c})`).join(', ');
+      lines.push(`- **CVEs:** ${cveLinks}`);
+    }
+    if (item.description) lines.push(`- **Summary:** ${item.description.slice(0, 300)}`);
+    lines.push(``);
+  }
+
+  lines.push(`---`, ``, `## 🟠 HIGH Priority (${high.length})`, ``);
+  for (const { item } of high.slice(0, 20)) {
+    const cveStr = item.cves.length > 0 ? ` — ${item.cves.join(', ')}` : '';
+    lines.push(`- **[${item.title}](${item.link})** — ${item.source}${cveStr}`);
+  }
+
+  if (kevCVEs.length > 0) {
+    lines.push(``, `---`, ``, `## ⚠ CISA KEV Matches (${kevCVEs.length} — Patch Immediately)`, ``);
+    kevCVEs.forEach(c => lines.push(`- [${c}](https://nvd.nist.gov/vuln/detail/${c})`));
+  }
+
+  if (allCVEs.length > 0) {
+    lines.push(``, `---`, ``, `## CVE Summary (${allCVEs.length})`, ``);
+    allCVEs.forEach(c => lines.push(`- [${c}](https://nvd.nist.gov/vuln/detail/${c})`));
+  }
+
+  lines.push(``, `---`, ``, `## IOC Summary`, ``);
+  if (allIPs.length > 0) {
+    lines.push(`### IP Addresses`);
+    allIPs.forEach(ip => lines.push(`- \`${ip}\``));
+    lines.push(``);
+  }
+  if (allHashes.length > 0) {
+    lines.push(`### File Hashes`);
+    allHashes.forEach(h => lines.push(`- \`${h}\``));
+    lines.push(``);
+  }
+
+  lines.push(`---`, ``, `*Generated by BriefSec — SOC Intelligence Feed*`);
+  return lines.join('\n');
+}
+
+function downloadBrief(content: string): void {
+  const date = new Date().toISOString().slice(0, 10);
+  const blob = new Blob([content], { type: 'text/markdown; charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `briefsec-soc-brief-${date}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Icons ───────────────────────────────────────────────────────────────────
 
 function IconRefresh({ spin }: { spin: boolean }) {
   return (
@@ -128,21 +339,60 @@ function IconMoon() {
   );
 }
 
+function IconDownload() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  );
+}
+
+// ─── SEV Helper ───────────────────────────────────────────────────────────────
+
+const SEV_CSS_VAR: Record<Severity, string> = {
+  CRITICAL: '#ef4444',
+  HIGH:     '#f97316',
+  MEDIUM:   '#eab308',
+  LOW:      '#475569',
+};
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 export default function BriefSec() {
+  // ── Core state ──────────────────────────────────────────────
   const [data, setData] = useState<FeedData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ── KEV state ────────────────────────────────────────────────
+  const [kevCves, setKevCves] = useState<string[]>([]);
+
+  // ── Filter/view state ────────────────────────────────────────
+  const [viewMode, setViewMode] = useState<ViewMode>('feed');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [tagFilter, setTagFilter] = useState('all');
+  const [sevFilter, setSevFilter] = useState<'ALL' | Severity>('ALL');
   const [search, setSearch] = useState('');
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [viewMode, setViewMode] = useState<'feed' | 'saved'>('feed');
   const [timeFilter, setTimeFilter] = useState<'all' | '24h'>('all');
-  const [savedArticles, setSavedArticles] = useState<Map<string, NewsItem>>(new Map());
+  const [sortBy, setSortBy] = useState<SortBy>('newest');
 
-  // Load persisted preferences from localStorage
+  // ── UI state ─────────────────────────────────────────────────
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [savedArticles, setSavedArticles] = useState<Map<string, NewsItem>>(new Map());
+  const [expandedIOCs, setExpandedIOCs] = useState<Set<string>>(new Set());
+  const [lastVisit, setLastVisit] = useState<number>(0);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const prevCriticalIds = useRef<Set<string>>(new Set());
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Bootstrap from localStorage ──────────────────────────────
   useEffect(() => {
     const savedTheme = localStorage.getItem('briefsec-theme') as 'dark' | 'light' | null;
     if (savedTheme) setTheme(savedTheme);
@@ -154,29 +404,23 @@ export default function BriefSec() {
         setSavedArticles(new Map(Object.entries(obj)));
       } catch { /* ignore */ }
     }
+
+    const storedVisit = localStorage.getItem('briefsec-last-visit');
+    const prev = storedVisit ? parseInt(storedVisit, 10) : 0;
+    setLastVisit(prev);
+    localStorage.setItem('briefsec-last-visit', String(Date.now()));
   }, []);
 
-  // Apply theme class to <html>
+  // ── Theme ────────────────────────────────────────────────────
   useEffect(() => {
     document.documentElement.classList.toggle('light', theme === 'light');
     localStorage.setItem('briefsec-theme', theme);
   }, [theme]);
 
-  const toggleSave = useCallback((item: NewsItem) => {
-    setSavedArticles(prev => {
-      const next = new Map(prev);
-      if (next.has(item.id)) {
-        next.delete(item.id);
-      } else {
-        next.set(item.id, item);
-      }
-      const obj: Record<string, NewsItem> = {};
-      next.forEach((v, k) => { obj[k] = v; });
-      localStorage.setItem('briefsec-saved', JSON.stringify(obj));
-      return next;
-    });
-  }, []);
+  // ── KEV set (derived) ────────────────────────────────────────
+  const kevSet = useMemo(() => new Set<string>(kevCves), [kevCves]);
 
+  // ── Fetch news ───────────────────────────────────────────────
   const fetchNews = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
@@ -195,14 +439,39 @@ export default function BriefSec() {
 
   useEffect(() => { fetchNews(); }, [fetchNews]);
 
-
-
+  // ── Auto-refresh ─────────────────────────────────────────────
   useEffect(() => {
     if (!autoRefresh) return;
     const id = setInterval(() => fetchNews(true), 15 * 60 * 1000);
     return () => clearInterval(id);
   }, [autoRefresh, fetchNews]);
 
+  // ── Fetch CISA KEV ───────────────────────────────────────────
+  useEffect(() => {
+    fetch('/api/kev')
+      .then(r => r.ok ? r.json() : null)
+      .then((d: { cves: string[] } | null) => { if (d?.cves) setKevCves(d.cves); })
+      .catch(() => {/* KEV gracefully degrades */});
+  }, []);
+
+  // ── CRITICAL alert toast on refresh ──────────────────────────
+  useEffect(() => {
+    if (!data) return;
+    const critIds = new Set(
+      data.items
+        .filter(i => computeSeverity(i, kevSet).level === 'CRITICAL')
+        .map(i => i.id)
+    );
+    const newCrits = [...critIds].filter(id => !prevCriticalIds.current.has(id));
+    if (prevCriticalIds.current.size > 0 && newCrits.length > 0) {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      setToast(`${newCrits.length} new CRITICAL alert${newCrits.length > 1 ? 's' : ''} since last refresh`);
+      toastTimer.current = setTimeout(() => setToast(null), 10000);
+    }
+    prevCriticalIds.current = critIds;
+  }, [data, kevSet]);
+
+  // ── Tags list (for filter bar) ───────────────────────────────
   const allTags = useMemo(() => {
     if (!data) return [];
     const counts = new Map<string, number>();
@@ -210,6 +479,33 @@ export default function BriefSec() {
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
   }, [data]);
 
+  // ── Threat counts (always from full 24h dataset) ─────────────
+  const threatCounts = useMemo(() => {
+    if (!data) return { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, kev: 0 };
+    const cutoff = Date.now() - 86_400_000;
+    const recent = data.items.filter(i => new Date(i.pubDate).getTime() > cutoff);
+    const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, kev: 0 };
+    for (const item of recent) {
+      const s = computeSeverity(item, kevSet);
+      counts[s.level]++;
+      if (s.isKev) counts.kev++;
+    }
+    return counts;
+  }, [data, kevSet]);
+
+  // ── KEV article count ────────────────────────────────────────
+  const kevCount = useMemo(
+    () => (data?.items ?? []).filter(i => i.cves.some(c => kevSet.has(c))).length,
+    [data, kevSet]
+  );
+
+  // ── Unread count ─────────────────────────────────────────────
+  const unreadCount = useMemo(
+    () => lastVisit === 0 ? 0 : (data?.items ?? []).filter(i => new Date(i.pubDate).getTime() > lastVisit).length,
+    [data, lastVisit]
+  );
+
+  // ── Filtered items ───────────────────────────────────────────
   const filteredItems = useMemo(() => {
     if (viewMode === 'saved') {
       return [...savedArticles.values()].sort(
@@ -218,13 +514,20 @@ export default function BriefSec() {
     }
 
     if (!data) return [];
-    let items = data.items;
+
+    let items = viewMode === 'kev'
+      ? data.items.filter(i => i.cves.some(c => kevSet.has(c)))
+      : data.items;
+
     if (sourceFilter !== 'all') items = items.filter(i => i.source === sourceFilter);
     if (tagFilter !== 'all') items = items.filter(i => i.tags.includes(tagFilter));
+    if (sevFilter !== 'ALL') items = items.filter(i => computeSeverity(i, kevSet).level === sevFilter);
+
     if (timeFilter === '24h') {
-      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const cutoff = Date.now() - 86_400_000;
       items = items.filter(i => new Date(i.pubDate).getTime() > cutoff);
     }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       items = items.filter(i =>
@@ -234,47 +537,156 @@ export default function BriefSec() {
         i.source.toLowerCase().includes(q)
       );
     }
+
+    if (sortBy === 'severity') {
+      const rank: Record<Severity, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+      items = [...items].sort((a, b) => {
+        const diff = rank[computeSeverity(a, kevSet).level] - rank[computeSeverity(b, kevSet).level];
+        if (diff !== 0) return diff;
+        return new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime();
+      });
+    }
+
     return items;
-  }, [data, sourceFilter, tagFilter, search, timeFilter, viewMode, savedArticles]);
+  }, [data, sourceFilter, tagFilter, sevFilter, search, timeFilter, viewMode, savedArticles, sortBy, kevSet]);
 
-  const cveCount = useMemo(() => {
-    if (!data) return 0;
-    return data.items.filter(i => i.cves.length > 0).length;
-  }, [data]);
+  // ── Enriched items (computed once per filteredItems change) ──
+  const enrichedItems = useMemo<EnrichedItem[]>(
+    () => filteredItems.map(item => ({
+      item,
+      severity: computeSeverity(item, kevSet),
+      iocs: extractIOCs(`${item.description} ${item.content || ''}`),
+      techniques: detectTechniques(`${item.title} ${item.description}`),
+      isNew: lastVisit > 0 && new Date(item.pubDate).getTime() > lastVisit,
+    })),
+    [filteredItems, kevSet, lastVisit]
+  );
 
-  const hasActiveFilters = sourceFilter !== 'all' || tagFilter !== 'all' || search || timeFilter !== 'all';
+  // ── Active filters check ─────────────────────────────────────
+  const hasActiveFilters = sourceFilter !== 'all' || tagFilter !== 'all' || search.trim() !== '' || timeFilter !== 'all' || sevFilter !== 'ALL';
+
+  // ── Handlers ─────────────────────────────────────────────────
+  const toggleSave = useCallback((item: NewsItem) => {
+    setSavedArticles(prev => {
+      const next = new Map(prev);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.set(item.id, item);
+      const obj: Record<string, NewsItem> = {};
+      next.forEach((v, k) => { obj[k] = v; });
+      localStorage.setItem('briefsec-saved', JSON.stringify(obj));
+      return next;
+    });
+  }, []);
+
+  const toggleIOC = useCallback((id: string) => {
+    setExpandedIOCs(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleCopy = useCallback(async (text: string, copyKey: string) => {
+    await copyToClipboard(text);
+    setCopiedId(copyKey);
+    setTimeout(() => setCopiedId(null), 1500);
+  }, []);
+
+  const markAllRead = useCallback(() => {
+    const now = Date.now();
+    setLastVisit(now);
+    localStorage.setItem('briefsec-last-visit', String(now));
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    setSourceFilter('all');
+    setTagFilter('all');
+    setSearch('');
+    setTimeFilter('all');
+    setSevFilter('ALL');
+  }, []);
+
+  // ─────────────────────────────────────────────────────────────
+  //  Render
+  // ─────────────────────────────────────────────────────────────
 
   return (
     <>
+      {/* ── Toast ── */}
+      {toast && (
+        <div className="toast-alert">
+          <span>⚠ {toast}</span>
+          <button className="toast-view-btn" onClick={() => { setSevFilter('CRITICAL'); setToast(null); }}>
+            View
+          </button>
+          <button className="toast-close" onClick={() => setToast(null)}>✕</button>
+        </div>
+      )}
+
       {/* ── Header ── */}
       <header className="header">
         <div className="header-brand">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/favicon.svg" alt="" width={28} height={28} style={{ borderRadius: '5px', flexShrink: 0 }} />
+          <img src="/favicon.svg" alt="" width={26} height={26} style={{ borderRadius: '5px', flexShrink: 0 }} />
           <div className="header-logo">Brief<span>Sec</span></div>
-          <span className="header-subtitle">Security Intelligence Feed</span>
+          <span className="header-subtitle">SOC Intelligence</span>
         </div>
+
+        {/* Threat strip — visible on wide screens */}
+        {data && !loading && (
+          <div className="threat-strip">
+            <span className="threat-item threat-item-crit"
+              onClick={() => setSevFilter(sevFilter === 'CRITICAL' ? 'ALL' : 'CRITICAL')}>
+              🔴 {threatCounts.CRITICAL} CRIT
+            </span>
+            <span className="threat-strip-sep" />
+            <span className="threat-item threat-item-high"
+              onClick={() => setSevFilter(sevFilter === 'HIGH' ? 'ALL' : 'HIGH')}>
+              🟠 {threatCounts.HIGH} HIGH
+            </span>
+            <span className="threat-strip-sep" />
+            <span className="threat-item threat-item-med"
+              onClick={() => setSevFilter(sevFilter === 'MEDIUM' ? 'ALL' : 'MEDIUM')}>
+              🟡 {threatCounts.MEDIUM} MED
+            </span>
+            {threatCounts.kev > 0 && (
+              <>
+                <span className="threat-strip-sep" />
+                <span className="threat-item threat-item-kev"
+                  onClick={() => setViewMode('kev')}>
+                  ⚠ {threatCounts.kev} KEV
+                </span>
+              </>
+            )}
+          </div>
+        )}
+
         <div className="header-actions">
+          {unreadCount > 0 && (
+            <button className="btn btn-unread" onClick={markAllRead} title="Mark all as read">
+              {unreadCount} new
+            </button>
+          )}
           <button
-            className="btn btn-icon"
-            onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            className="btn btn-export"
+            onClick={() => downloadBrief(generateBrief(data?.items ?? [], kevSet))}
+            title="Download SOC daily brief as Markdown"
           >
+            <IconDownload />
+            <span>Export Brief</span>
+          </button>
+          <button className="btn btn-icon" onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+            title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>
             {theme === 'dark' ? <IconSun /> : <IconMoon />}
           </button>
-          <button
-            className={`btn btn-refresh${refreshing ? ' spinning' : ''}`}
-            onClick={() => fetchNews(true)}
-            disabled={refreshing}
-          >
+          <button className={`btn btn-refresh${refreshing ? ' spinning' : ''}`}
+            onClick={() => fetchNews(true)} disabled={refreshing}>
             <IconRefresh spin={refreshing} />
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
-          <button
-            className={`btn btn-auto${autoRefresh ? ' active' : ''}`}
-            onClick={() => setAutoRefresh(v => !v)}
-            title="Auto-refresh every 15 minutes"
-          >
+          <button className={`btn btn-auto${autoRefresh ? ' active' : ''}`}
+            onClick={() => setAutoRefresh(v => !v)} title="Auto-refresh every 15 minutes">
             Auto {autoRefresh ? 'ON' : 'OFF'}
           </button>
         </div>
@@ -282,114 +694,133 @@ export default function BriefSec() {
 
       {/* ── Filter Bar ── */}
       <div className="filter-bar">
-        {/* Row 0: View tabs + time filter */}
+        {/* Row 0: View tabs + time + sort + export */}
         <div className="filter-top-row">
           <div className="view-tabs">
+            <button className={`view-tab${viewMode === 'feed' ? ' active' : ''}`}
+              onClick={() => setViewMode('feed')}>Feed</button>
+            <button className={`view-tab${viewMode === 'saved' ? ' active' : ''}`}
+              onClick={() => setViewMode('saved')}>
+              Saved{savedArticles.size > 0 ? ` (${savedArticles.size})` : ''}
+            </button>
             <button
-              className={`view-tab${viewMode === 'feed' ? ' active' : ''}`}
-              onClick={() => setViewMode('feed')}
-            >Feed</button>
-            <button
-              className={`view-tab${viewMode === 'saved' ? ' active' : ''}`}
-              onClick={() => setViewMode('saved')}
-            >Saved {savedArticles.size > 0 ? `(${savedArticles.size})` : ''}</button>
+              className={`view-tab kev-tab${viewMode === 'kev' ? ' active' : ''}`}
+              onClick={() => setViewMode('kev')}>
+              ⚠ KEV{kevCount > 0 ? ` (${kevCount})` : ''}
+            </button>
           </div>
-          <div className="time-tabs">
-            <button
-              className={`view-tab${timeFilter === 'all' ? ' active' : ''}`}
-              onClick={() => setTimeFilter('all')}
-            >All time</button>
-            <button
-              className={`view-tab${timeFilter === '24h' ? ' active' : ''}`}
-              onClick={() => setTimeFilter('24h')}
-            >Last 24h</button>
+
+          <div className="filter-right-group">
+            <div className="time-tabs">
+              <button className={`view-tab${timeFilter === 'all' ? ' active' : ''}`}
+                onClick={() => setTimeFilter('all')}>All time</button>
+              <button className={`view-tab${timeFilter === '24h' ? ' active' : ''}`}
+                onClick={() => setTimeFilter('24h')}>24h</button>
+            </div>
+            <span className="filter-sep" />
+            <div className="sort-tabs">
+              <button className={`view-tab${sortBy === 'newest' ? ' active' : ''}`}
+                onClick={() => setSortBy('newest')}>Newest</button>
+              <button className={`view-tab${sortBy === 'severity' ? ' active' : ''}`}
+                onClick={() => setSortBy('severity')}>By Risk</button>
+            </div>
           </div>
         </div>
 
-        {/* Row 1: Sources */}
+        {/* Row 1: Severity filter */}
+        <div className="filter-row">
+          <span className="filter-label">Risk</span>
+          <button className={`pill${sevFilter === 'ALL' ? ' active' : ''}`}
+            onClick={() => setSevFilter('ALL')}>All</button>
+          {(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const).map(s => (
+            <button key={s}
+              className={`pill sev-pill-${s.toLowerCase()}${sevFilter === s ? ' active' : ''}`}
+              onClick={() => setSevFilter(sevFilter === s ? 'ALL' : s)}>
+              {s === 'CRITICAL' ? '🔴 CRITICAL' : s === 'HIGH' ? '🟠 HIGH' : s === 'MEDIUM' ? '🟡 MEDIUM' : '⚪ LOW'}
+            </button>
+          ))}
+        </div>
+
+        {/* Row 2: Source filter */}
         <div className="filter-row">
           <span className="filter-label">Source</span>
-          <button
-            className={`pill${sourceFilter === 'all' ? ' active' : ''}`}
-            onClick={() => setSourceFilter('all')}
-          >All</button>
+          <button className={`pill${sourceFilter === 'all' ? ' active' : ''}`}
+            onClick={() => setSourceFilter('all')}>All</button>
           {(data?.sources ?? []).map(src => (
-            <button
-              key={src}
+            <button key={src}
               className={`pill${sourceFilter === src ? ' active' : ''}`}
               onClick={() => setSourceFilter(src === sourceFilter ? 'all' : src)}
               style={sourceFilter === src ? {
                 background: getSourceStyle(src).bg,
                 color: getSourceStyle(src).color,
                 borderColor: getSourceStyle(src).accent,
-              } : {}}
-            >{src}</button>
+              } : {}}>
+              {src}
+            </button>
           ))}
         </div>
 
-        {/* Row 2: Tags */}
+        {/* Row 3: Tag filter */}
         <div className="filter-row">
           <span className="filter-label">Tag</span>
-          <button
-            className={`pill${tagFilter === 'all' ? ' active' : ''}`}
-            onClick={() => setTagFilter('all')}
-          >All</button>
+          <button className={`pill${tagFilter === 'all' ? ' active' : ''}`}
+            onClick={() => setTagFilter('all')}>All</button>
           {allTags.map(tag => {
             const s = getTagStyle(tag);
             return (
-              <button
-                key={tag}
+              <button key={tag}
                 className={`pill${tagFilter === tag ? ' active' : ''}`}
                 onClick={() => setTagFilter(tag === tagFilter ? 'all' : tag)}
-                style={tagFilter === tag ? { background: s.bg, color: s.color, borderColor: s.border } : {}}
-              >{tag}</button>
+                style={tagFilter === tag ? { background: s.bg, color: s.color, borderColor: s.border } : {}}>
+                {tag}
+              </button>
             );
           })}
         </div>
 
-        {/* Row 3: Search */}
+        {/* Row 4: Search */}
         <div className="search-row">
           <IconSearch />
-          <input
-            className="search-input"
-            placeholder="Search articles, CVEs, sources…"
+          <input className="search-input"
+            placeholder="Search articles, CVEs, IOCs, sources…"
             value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+            onChange={e => setSearch(e.target.value)} />
         </div>
       </div>
 
-      {/* ── Stats Bar ── */}
+      {/* ── Threat Summary / Stats Bar ── */}
       {(data || viewMode === 'saved') && !loading && (
         <div className="stats-bar">
           {viewMode === 'saved' ? (
             <span><span className="stats-count">{savedArticles.size}</span> saved articles</span>
           ) : (
             <>
-              <span><span className="stats-count">{filteredItems.length}</span> articles</span>
-              <span>·</span>
-              <span><span className="stats-count">{data?.sources.length ?? 0}</span> sources</span>
-              {cveCount > 0 && (
+              <span>
+                <span className="stats-count">{filteredItems.length}</span> articles
+              </span>
+              {viewMode === 'feed' && (
                 <>
                   <span>·</span>
-                  <span><span className="stats-count" style={{ color: 'var(--red)' }}>{cveCount}</span> with CVEs</span>
+                  <span><span className="stats-count">{data?.sources.length ?? 0}</span> sources</span>
+                </>
+              )}
+              {viewMode === 'kev' && kevCount > 0 && (
+                <>
+                  <span>·</span>
+                  <span><span className="stats-kev-count">{kevCount}</span> KEV matches</span>
                 </>
               )}
               <span className="live-dot">Live</span>
               {data?.lastRefresh && (
-                <>
-                  <span>·</span>
-                  <span>Updated {timeAgo(data.lastRefresh)}</span>
-                </>
+                <span>· Updated {timeAgo(data.lastRefresh)}</span>
               )}
             </>
           )}
-          {hasActiveFilters && viewMode === 'feed' && (
-            <button
-              className="btn"
-              style={{ padding: '2px 8px', fontSize: '10px' }}
-              onClick={() => { setSourceFilter('all'); setTagFilter('all'); setSearch(''); setTimeFilter('all'); }}
-            >Clear filters</button>
+          {hasActiveFilters && viewMode !== 'saved' && (
+            <button className="btn" style={{ padding: '2px 8px', fontSize: '10px' }}
+              onClick={clearFilters}>
+              Clear filters
+            </button>
           )}
         </div>
       )}
@@ -398,7 +829,7 @@ export default function BriefSec() {
       {loading && (
         <div className="loading-wrap" style={{ marginTop: 'calc(var(--header-h) + var(--filter-h))' }}>
           <div className="spinner" />
-          <span>Fetching security feeds…</span>
+          <span>Fetching security intelligence feeds…</span>
         </div>
       )}
 
@@ -422,40 +853,60 @@ export default function BriefSec() {
         </div>
       )}
 
+      {/* ── KEV empty state ── */}
+      {!loading && !error && viewMode === 'kev' && filteredItems.length === 0 && (
+        <div className="empty-wrap" style={{ marginTop: 'calc(var(--header-h) + var(--filter-h))' }}>
+          <span style={{ fontSize: '24px' }}>✅</span>
+          <span>No KEV matches in current articles.</span>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            CISA KEV catalog loaded — no articles reference actively exploited CVEs right now.
+          </span>
+        </div>
+      )}
+
       {/* ── Feed empty state ── */}
       {!loading && !error && viewMode === 'feed' && filteredItems.length === 0 && data && (
         <div className="empty-wrap" style={{ marginTop: 'calc(var(--header-h) + var(--filter-h))' }}>
           <span style={{ fontSize: '24px' }}>🔍</span>
           <span>No articles match your filters.</span>
-          <button className="btn" onClick={() => { setSourceFilter('all'); setTagFilter('all'); setSearch(''); setTimeFilter('all'); }}>
-            Clear filters
-          </button>
+          <button className="btn" onClick={clearFilters}>Clear filters</button>
         </div>
       )}
 
       {/* ── Articles ── */}
-      {!loading && !error && filteredItems.length > 0 && (
+      {!loading && !error && enrichedItems.length > 0 && (
         <main className="news-grid">
-          {filteredItems.map(item => {
+          {enrichedItems.map(({ item, severity, iocs, techniques, isNew }) => {
             const srcStyle = getSourceStyle(item.source);
             const isSaved = savedArticles.has(item.id);
+            const isIOCOpen = expandedIOCs.has(item.id);
+            const totalIOCs = iocs.ips.length + iocs.hashes.length + iocs.domains.length;
+            const cardBorderColor = severity.level !== 'LOW' ? SEV_CSS_VAR[severity.level] : srcStyle.accent;
+
             return (
               <article
                 key={item.id}
                 className="news-card"
-                style={{ '--source-color': srcStyle.accent } as React.CSSProperties}
+                style={{ '--source-color': cardBorderColor } as React.CSSProperties}
               >
+                {/* ── Card Header ── */}
                 <div className="card-header">
-                  <span className="source-badge" style={{ background: srcStyle.bg, color: srcStyle.color }}>
-                    {item.source}
-                  </span>
+                  <div className="card-header-left">
+                    <span className={`sev-badge sev-badge-${severity.level.toLowerCase()}`}>
+                      {severity.level === 'CRITICAL' ? 'CRIT' : severity.level}
+                    </span>
+                    {severity.isKev && <span className="kev-badge">⚠ KEV</span>}
+                    <span className="source-badge"
+                      style={{ background: srcStyle.bg, color: srcStyle.color }}>
+                      {item.source}
+                    </span>
+                  </div>
                   <div className="card-meta">
+                    {isNew && <span className="new-badge">NEW</span>}
                     <span className="time-ago">{timeAgo(item.pubDate)}</span>
-                    <button
-                      className={`btn-save${isSaved ? ' saved' : ''}`}
+                    <button className={`btn-save${isSaved ? ' saved' : ''}`}
                       onClick={() => toggleSave(item)}
-                      title={isSaved ? 'Remove from saved' : 'Save article'}
-                    >
+                      title={isSaved ? 'Remove from saved' : 'Save article'}>
                       <IconBookmark filled={isSaved} />
                     </button>
                     <a className="read-link" href={item.link} target="_blank" rel="noopener noreferrer">
@@ -464,35 +915,152 @@ export default function BriefSec() {
                   </div>
                 </div>
 
+                {/* ── Title ── */}
                 <h2 className="card-title">
                   <a href={item.link} target="_blank" rel="noopener noreferrer">{item.title}</a>
                 </h2>
 
+                {/* ── CVE Badges → NVD Links ── */}
                 {item.cves.length > 0 && (
                   <div className="cve-badges">
-                    {item.cves.slice(0, 4).map(cve => (
-                      <span key={cve} className="cve-badge">{cve}</span>
+                    {item.cves.slice(0, 5).map(cve => (
+                      <a key={cve}
+                        className="cve-badge"
+                        href={`https://nvd.nist.gov/vuln/detail/${cve}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`View ${cve} on NVD`}>
+                        {cve} ↗
+                      </a>
                     ))}
+                    {item.cves.length > 5 && (
+                      <span className="cve-badge" style={{ opacity: 0.6 }}>
+                        +{item.cves.length - 5}
+                      </span>
+                    )}
                   </div>
                 )}
 
+                {/* ── Description ── */}
                 {item.description && (
                   <p className="card-description">{item.description}</p>
                 )}
 
+                {/* ── ATT&CK Techniques ── */}
+                {techniques.length > 0 && (
+                  <div className="card-attacks">
+                    {techniques.map(t => (
+                      <span key={t.id} className="attack-badge" title={t.name}>
+                        {t.id} · {t.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* ── Threat Tags ── */}
                 {item.tags.length > 0 && (
                   <div className="card-tags">
                     {item.tags.map(tag => {
                       const ts = getTagStyle(tag);
                       return (
-                        <span
-                          key={tag}
-                          className="tag"
+                        <span key={tag} className="tag"
                           style={{ background: ts.bg, color: ts.color, borderColor: ts.border, cursor: 'pointer' }}
-                          onClick={() => setTagFilter(tag === tagFilter ? 'all' : tag)}
-                        >{tag}</span>
+                          onClick={() => setTagFilter(tag === tagFilter ? 'all' : tag)}>
+                          {tag}
+                        </span>
                       );
                     })}
+                  </div>
+                )}
+
+                {/* ── IOC Panel ── */}
+                {totalIOCs > 0 && (
+                  <div className="ioc-section">
+                    <button
+                      className={`ioc-toggle${isIOCOpen ? ' open' : ''}`}
+                      onClick={() => toggleIOC(item.id)}>
+                      <span className="ioc-toggle-arrow">▶</span>
+                      {isIOCOpen ? 'Hide IOCs' : `IOCs (${totalIOCs})`}
+                    </button>
+
+                    {isIOCOpen && (
+                      <div className="ioc-panel">
+                        {iocs.ips.length > 0 && (
+                          <div>
+                            <div className="ioc-group-label">IP Addresses</div>
+                            <div className="ioc-group">
+                              {iocs.ips.map(ip => {
+                                const key = `ip-${ip}`;
+                                return (
+                                  <button key={ip}
+                                    className={`ioc-chip${copiedId === key ? ' copied' : ''}`}
+                                    onClick={() => handleCopy(ip, key)}
+                                    title={`Copy ${ip}`}>
+                                    {ip}
+                                    <span className="ioc-chip-icon">
+                                      {copiedId === key ? '✓' : '⎘'}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {iocs.hashes.length > 0 && (
+                          <div>
+                            <div className="ioc-group-label">Hashes</div>
+                            <div className="ioc-group">
+                              {iocs.hashes.map((h, idx) => {
+                                const key = `hash-${idx}`;
+                                const label = h.length === 64 ? 'SHA256' : h.length === 40 ? 'SHA1' : 'MD5';
+                                return (
+                                  <button key={h}
+                                    className={`ioc-chip${copiedId === key ? ' copied' : ''}`}
+                                    onClick={() => handleCopy(h, key)}
+                                    title={`${label}: ${h}`}>
+                                    {h.slice(0, 16)}…
+                                    <span className="ioc-chip-icon">
+                                      {copiedId === key ? '✓' : '⎘'}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {iocs.domains.length > 0 && (
+                          <div>
+                            <div className="ioc-group-label">Domains</div>
+                            <div className="ioc-group">
+                              {iocs.domains.map((d, idx) => {
+                                const key = `dom-${idx}`;
+                                return (
+                                  <button key={d}
+                                    className={`ioc-chip${copiedId === key ? ' copied' : ''}`}
+                                    onClick={() => handleCopy(d, key)}
+                                    title={`Copy ${d}`}>
+                                    {d}
+                                    <span className="ioc-chip-icon">
+                                      {copiedId === key ? '✓' : '⎘'}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        <button className="ioc-copy-all"
+                          onClick={() => {
+                            const all = [...iocs.ips, ...iocs.hashes, ...iocs.domains].join('\n');
+                            handleCopy(all, `all-${item.id}`);
+                          }}>
+                          {copiedId === `all-${item.id}` ? '✓ Copied all IOCs' : 'Copy all IOCs'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </article>
@@ -500,7 +1068,6 @@ export default function BriefSec() {
           })}
         </main>
       )}
-      {/* ── Article Modal ── */}
     </>
   );
 }
