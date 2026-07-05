@@ -969,7 +969,7 @@ export default function BriefSec() {
           </button>
           <button className={`btn btn-refresh${refreshing ? ' spinning' : ''}`}
             onClick={() => fetchNews(true)} disabled={refreshing}>
-            <IconRefresh spin={refreshing} />{refreshing ? 'Refreshing…' : 'Refresh'}
+            <IconRefresh spin={refreshing} /><span className="btn-refresh-text">{refreshing ? 'Refreshing…' : 'Refresh'}</span>
           </button>
           <button className={`btn btn-auto${autoRefresh ? ' active' : ''}`}
             onClick={() => setAutoRefresh(v => !v)}>
@@ -1007,7 +1007,7 @@ export default function BriefSec() {
               className={`view-tab stack-tab${stackFilter ? ' active' : ''}`}
               onClick={() => setStackFilter(v => !v)}
               title="Show only articles affecting your tech stack">
-              My Stack
+              Default Stack
             </button>
             <span className="filter-sep" />
             <div className="time-tabs">
