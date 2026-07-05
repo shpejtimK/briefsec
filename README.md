@@ -1,4 +1,4 @@
-# BriefSec — SOC Intelligence Dashboard
+# BriefSec - SOC Intelligence Dashboard
 
 A real-time cybersecurity intelligence tool built for Security Operations Centre (SOC) analysts. BriefSec aggregates 15 trusted security sources, cross-references the CISA Known Exploited Vulnerabilities catalog, tracks CVEs across your technology stack, extracts IOCs, maps MITRE ATT&CK techniques, and exports artifacts ready for Splunk and MISP — all in a single fast dashboard with no external SaaS dependencies.
 
