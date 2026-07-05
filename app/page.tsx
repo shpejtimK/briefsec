@@ -294,11 +294,16 @@ function exportMispJson(items: NewsItem[], kevSet: Set<string>): void {
   URL.revokeObjectURL(url);
 }
 
-function cleanSummary(text: string, limit = 400): string {
+function cleanSummary(text: string, limit = 600): string {
   const clean = text
-    // CISA CSAF advisory boilerplate: "CVSS v3 6.1 MEDIUM ...", score/vector table rows
+    // CISA ICS / CSAF navigation links
+    .replace(/View CSAF\b[^\n.;]*/gi, '')
+    .replace(/\bCSAF\b[^\n.;]*/gi, '')
+    // CVSS score/vector table rows
     .replace(/CVSS\s+(?:v[23]\s+)?[\d.]+\s*(?:CRITICAL|HIGH|MEDIUM|LOW)?[^\n.;]{0,120}/gi, '')
     .replace(/\b(?:Base Score|Vector(?: String)?|Impact Score|Exploitability Score)\s*:?\s*[\d.]+[^\n.;]{0,80}/gi, '')
+    // CWE descriptor lines (e.g. "CWE-497: Exposure of System Information...")
+    .replace(/\bCWE-\d+:?[^\n.;]{0,120}/gi, '')
     // "Vendor Equipment Vulnerabilities" and similar advisory table fragments
     .replace(/\b\w[\w\s]{0,30}(?:Equipment|Products?)\s+Vulnerabilities?[^\n.;]{0,80}/gi, '')
     // Pipe-delimited table rows that leak in from CSAF HTML
@@ -340,7 +345,7 @@ function generateBrief(items: NewsItem[], kevSet: Set<string>): string {
     lines.push(`- **Link:** <${item.link}>`);
     if (sev.isKev) lines.push(`- **⚠ CISA KEV:** Confirmed exploited in the wild — patch immediately`);
     if (item.cves.length > 0) lines.push(`- **CVEs:** ${item.cves.map(c => `[${c}](https://nvd.nist.gov/vuln/detail/${c})`).join(', ')}`);
-    if (item.description) lines.push(`- **Summary:** ${cleanSummary(item.description, 400)}`);
+    if (item.description) lines.push(`- **Summary:** ${cleanSummary(item.description)}`);
     lines.push(``);
   }
   lines.push(`---`, ``, `## 🟠 HIGH Priority (${high.length})`, ``);
