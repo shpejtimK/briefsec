@@ -1007,7 +1007,7 @@ export default function BriefSec() {
               className={`view-tab stack-tab${stackFilter ? ' active' : ''}`}
               onClick={() => setStackFilter(v => !v)}
               title="Show only articles affecting your tech stack">
-              Default Stack
+              PF
             </button>
             <span className="filter-sep" />
             <div className="time-tabs">
