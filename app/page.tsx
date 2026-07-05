@@ -582,6 +582,7 @@ export default function BriefSec() {
 
   const prevCriticalIds = useRef<Set<string>>(new Set());
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fetchingRef = useRef(false);
 
   // ── Bootstrap localStorage ────────────────────────────────────
   useEffect(() => {
@@ -614,15 +615,28 @@ export default function BriefSec() {
 
   // ── Fetch news ────────────────────────────────────────────────
   const fetchNews = useCallback(async (isRefresh = false) => {
+    if (fetchingRef.current) return; // prevent concurrent fetches
+    fetchingRef.current = true;
     if (isRefresh) setRefreshing(true); else setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/news', { cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setData(await res.json());
+      // Fetch news and KEV in parallel so refresh reflects latest KEV status
+      const [newsRes, kevRes] = await Promise.all([
+        fetch('/api/news', { cache: 'no-store' }),
+        fetch('/api/kev'),
+      ]);
+      if (!newsRes.ok) throw new Error(`HTTP ${newsRes.status}`);
+      setData(await newsRes.json());
+      if (kevRes.ok) {
+        const kevData = await kevRes.json() as { cves: string[] };
+        if (kevData?.cves) setKevCves(kevData.cves);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
-    } finally { setLoading(false); setRefreshing(false); }
+    } finally {
+      fetchingRef.current = false;
+      if (isRefresh) setRefreshing(false); else setLoading(false);
+    }
   }, []);
 
   useEffect(() => { fetchNews(); }, [fetchNews]);
@@ -967,7 +981,7 @@ export default function BriefSec() {
             title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>
             {theme === 'dark' ? <IconSun /> : <IconMoon />}
           </button>
-          <button className={`btn btn-refresh${refreshing ? ' spinning' : ''}`}
+          <button className="btn btn-refresh"
             onClick={() => fetchNews(true)} disabled={refreshing}>
             <IconRefresh spin={refreshing} /><span className="btn-refresh-text">{refreshing ? 'Refreshing…' : 'Refresh'}</span>
           </button>

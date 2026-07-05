@@ -195,6 +195,12 @@ button { font-family: inherit; cursor: pointer; border: none; outline: none; }
   background: var(--accent-dim);
 }
 
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .btn.active {
   border-color: var(--accent);
   color: var(--accent);
