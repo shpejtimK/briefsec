@@ -294,6 +294,31 @@ function exportMispJson(items: NewsItem[], kevSet: Set<string>): void {
   URL.revokeObjectURL(url);
 }
 
+function cleanSummary(text: string, limit = 400): string {
+  const clean = text
+    // CISA CSAF advisory boilerplate: "CVSS v3 6.1 MEDIUM ...", score/vector table rows
+    .replace(/CVSS\s+(?:v[23]\s+)?[\d.]+\s*(?:CRITICAL|HIGH|MEDIUM|LOW)?[^\n.;]{0,120}/gi, '')
+    .replace(/\b(?:Base Score|Vector(?: String)?|Impact Score|Exploitability Score)\s*:?\s*[\d.]+[^\n.;]{0,80}/gi, '')
+    // "Vendor Equipment Vulnerabilities" and similar advisory table fragments
+    .replace(/\b\w[\w\s]{0,30}(?:Equipment|Products?)\s+Vulnerabilities?[^\n.;]{0,80}/gi, '')
+    // Pipe-delimited table rows that leak in from CSAF HTML
+    .replace(/(?:\|\s*[^|]+){2,}\|/g, '')
+    // Leftover "v3 6.1" CVSS version+score patterns
+    .replace(/\bv[23]\s+[\d.]+\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  if (clean.length <= limit) return clean;
+
+  const slice = clean.slice(0, limit);
+  // Prefer a full-sentence boundary
+  const lastSent = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('! '), slice.lastIndexOf('? '));
+  if (lastSent > limit * 0.45) return slice.slice(0, lastSent + 1).trimEnd();
+  // Fall back to word boundary — never cuts mid-word or mid-CVE-ID
+  const lastSpace = slice.lastIndexOf(' ');
+  return (lastSpace > limit * 0.3 ? slice.slice(0, lastSpace) : slice).trimEnd() + '…';
+}
+
 function generateBrief(items: NewsItem[], kevSet: Set<string>): string {
   const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   const ts = new Date().toUTCString();
@@ -315,7 +340,7 @@ function generateBrief(items: NewsItem[], kevSet: Set<string>): string {
     lines.push(`- **Link:** <${item.link}>`);
     if (sev.isKev) lines.push(`- **⚠ CISA KEV:** Confirmed exploited in the wild — patch immediately`);
     if (item.cves.length > 0) lines.push(`- **CVEs:** ${item.cves.map(c => `[${c}](https://nvd.nist.gov/vuln/detail/${c})`).join(', ')}`);
-    if (item.description) lines.push(`- **Summary:** ${item.description.slice(0, 300)}`);
+    if (item.description) lines.push(`- **Summary:** ${cleanSummary(item.description, 400)}`);
     lines.push(``);
   }
   lines.push(`---`, ``, `## 🟠 HIGH Priority (${high.length})`, ``);
