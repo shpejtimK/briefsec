@@ -198,9 +198,37 @@ function detectTechniques(text: string): AttackTechnique[] {
 
 function extractIOCs(text: string): IOCResult {
   const t = text.replace(/\[\.]/g, '.').replace(/hxxp/gi, 'http');
-  const ips = [...new Set(
-    (t.match(/\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\b/g) || [])
-  )].filter(ip => !/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|0\.|255\.|169\.254\.)/.test(ip)).slice(0, 10);
+
+  // Context-aware IP extraction — filters out version numbers misclassified as IPs
+  const IP_RE = /\b((?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d))\b/g;
+  const THREAT_CTX = /\b(?:ip[ -]?address|c2|c&c|host|connect|communicat|download|upload|phish|malware|attack|backdoor|deliver|infrastructure|traffic|src|dst|remote|proxy|scan|exfiltr|indicator|ioc|threat actor|campaign|panel|implant|dropper|payload|beacon|resolv)\b/i;
+  const VERSION_BEFORE = /(?:version|ver\.?|firmware|release|build|update|patch|through|prior to|earlier than|up to|affecting|affected)\s{0,4}$/i;
+
+  const seen = new Set<string>();
+  const ips: string[] = [];
+  let m: RegExpExecArray | null;
+
+  while ((m = IP_RE.exec(t)) !== null && ips.length < 10) {
+    const ip = m[1];
+    if (seen.has(ip)) continue;
+    // Private / reserved ranges
+    if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|0\.|255\.|169\.254\.)/.test(ip)) continue;
+    const start = m.index;
+    const end   = start + ip.length;
+    const before = t.slice(Math.max(0, start - 60), start);
+    const after  = t.slice(end, Math.min(t.length, end + 10));
+    // Part of a longer version string e.g. "1.0.2.5.6"
+    if (/^\.\d/.test(after)) continue;
+    // Preceded by version/firmware keywords
+    if (VERSION_BEFORE.test(before)) continue;
+    // First octet ≤ 20 is characteristic of software versions, not routable threat IPs
+    if (parseInt(ip.split('.')[0], 10) <= 20) continue;
+    // Require at least one network/threat term in the surrounding 300 chars
+    const ctx = t.slice(Math.max(0, start - 200), Math.min(t.length, end + 100));
+    if (!THREAT_CTX.test(ctx)) continue;
+    seen.add(ip);
+    ips.push(ip);
+  }
   const sha256 = [...new Set((t.match(/\b[0-9a-fA-F]{64}\b/g) || []).map(h => h.toLowerCase()))];
   const sha1   = [...new Set((t.match(/\b[0-9a-fA-F]{40}\b/g) || []).map(h => h.toLowerCase()))];
   const md5    = [...new Set((t.match(/\b[0-9a-fA-F]{32}\b/g) || []).map(h => h.toLowerCase()))];
