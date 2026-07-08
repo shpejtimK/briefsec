@@ -12,7 +12,7 @@ interface NewsItem {
 
 type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 type SortBy   = 'newest' | 'severity';
-type ViewMode = 'feed' | 'saved' | 'kev' | 'cve-tracker' | 'trends';
+type ViewMode = 'feed' | 'saved' | 'kev' | 'cve-tracker' | 'trends' | 'ip-lookup';
 
 interface SeverityResult  { level: Severity; isKev: boolean; }
 interface IOCResult        { ips: string[]; hashes: string[]; domains: string[]; }
@@ -42,6 +42,35 @@ interface CveTrackerData {
   entries: NvdEntry[];
   statuses: Record<string, CveStatus>;
   lastFetched: number;
+}
+
+interface GeoData {
+  country: string; countryCode: string; region: string; city: string; zip: string;
+  lat: number; lon: number; timezone: string; isp: string; org: string;
+  as: string; asname: string; proxy: boolean; hosting: boolean; mobile: boolean;
+}
+interface AbuseData {
+  score: number; totalReports: number; numDistinctUsers: number;
+  lastReportedAt: string | null; isPublic: boolean; isWhitelisted: boolean;
+  usageType: string; domain: string; hostnames: string[]; isTor: boolean; countryCode: string;
+}
+interface VTData {
+  malicious: number; suspicious: number; harmless: number; undetected: number; total: number;
+  lastAnalysisDate: string | null; reputation: number; asOwner: string; network: string;
+}
+interface ShodanData {
+  ports: number[]; hostnames: string[]; domains: string[]; country: string;
+  org: string; isp: string; vulns: string[];
+  data: Array<{ port: number; transport: string; product?: string; version?: string }>;
+  lastUpdate: string;
+}
+interface IPLinks {
+  abuseipdb: string; virustotal: string; shodan: string; censys: string;
+  greynoise: string; talos: string; bgp: string; ipinfo: string;
+}
+interface IPLookupResult {
+  ip: string; geo: GeoData | null; abuse: AbuseData | null; vt: VTData | null;
+  shodan: ShodanData | null; links: IPLinks; cached: boolean; fetchedAt: number;
 }
 
 // ─── Source & Tag Styles ──────────────────────────────────────────────────────
@@ -292,6 +321,16 @@ function exportMispJson(items: NewsItem[], kevSet: Set<string>): void {
   const a = document.createElement('a');
   a.href = url; a.download = `misp-event-${new Date().toISOString().slice(0, 10)}.json`; a.click();
   URL.revokeObjectURL(url);
+}
+
+function ipRiskLevel(r: IPLookupResult): { level: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN'; color: string } {
+  const score = r.abuse?.score ?? -1;
+  const mal   = r.vt?.malicious ?? 0;
+  const vulns = r.shodan?.vulns.length ?? 0;
+  if (score >= 50 || mal >= 5) return { level: 'HIGH',    color: '#ef4444' };
+  if (score >= 15 || mal >= 1 || vulns > 0) return { level: 'MEDIUM', color: '#eab308' };
+  if (score >= 0)  return { level: 'LOW',     color: '#22c55e' };
+  return { level: 'UNKNOWN', color: '#64748b' };
 }
 
 function cleanSummary(text: string, limit = 600): string {
@@ -580,6 +619,12 @@ export default function BriefSec() {
   // ── CVSS scores ───────────────────────────────────────────────
   const [cvssScores, setCvssScores] = useState<Record<string, CvssInfo>>({});
 
+  // ── IP Lookup ─────────────────────────────────────────────────
+  const [ipQuery,   setIpQuery]   = useState('');
+  const [ipResult,  setIpResult]  = useState<IPLookupResult | null>(null);
+  const [ipLoading, setIpLoading] = useState(false);
+  const [ipError,   setIpError]   = useState<string | null>(null);
+
   const prevCriticalIds = useRef<Set<string>>(new Set());
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetchingRef = useRef(false);
@@ -683,6 +728,24 @@ export default function BriefSec() {
   useEffect(() => {
     if (viewMode === 'cve-tracker' && !cveTracker && !cveTrackerLoading) fetchCveTracker();
   }, [viewMode, cveTracker, cveTrackerLoading, fetchCveTracker]);
+
+  const lookupIP = useCallback(async (ip: string) => {
+    const trimmed = ip.trim();
+    if (!trimmed) return;
+    setIpLoading(true);
+    setIpError(null);
+    setIpResult(null);
+    try {
+      const res = await fetch(`/api/ip-lookup?ip=${encodeURIComponent(trimmed)}`);
+      const d = await res.json() as IPLookupResult & { error?: string };
+      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+      setIpResult(d);
+    } catch (e) {
+      setIpError(e instanceof Error ? e.message : 'Lookup failed');
+    } finally {
+      setIpLoading(false);
+    }
+  }, []);
 
   // ── CRITICAL toast on refresh ─────────────────────────────────
   useEffect(() => {
@@ -1014,6 +1077,10 @@ export default function BriefSec() {
               onClick={() => setViewMode('trends')}>
               Trends
             </button>
+            <button className={`view-tab ip-tab${viewMode === 'ip-lookup' ? ' active' : ''}`}
+              onClick={() => setViewMode('ip-lookup')}>
+              🔍 IP Lookup
+            </button>
           </div>
 
           <div className="filter-right-group">
@@ -1086,7 +1153,7 @@ export default function BriefSec() {
       </div>
 
       {/* ── Stats Bar ── */}
-      {(data || viewMode === 'saved') && !loading && viewMode !== 'cve-tracker' && viewMode !== 'trends' && (
+      {(data || viewMode === 'saved') && !loading && viewMode !== 'cve-tracker' && viewMode !== 'trends' && viewMode !== 'ip-lookup' && (
         <div className="stats-bar">
           {viewMode === 'saved' ? (
             <span><span className="stats-count">{savedArticles.size}</span> saved articles</span>
@@ -1572,6 +1639,253 @@ export default function BriefSec() {
             );
           })}
         </main>
+      )}
+
+      {/* ── IP Lookup View ── */}
+      {viewMode === 'ip-lookup' && (
+        <div className="ip-lookup-view">
+          <div className="ip-search-wrap">
+            <h2 className="ip-lookup-title">IP Intelligence Lookup</h2>
+            <p className="ip-lookup-sub">Aggregate threat intelligence from AbuseIPDB, VirusTotal, Shodan, and geolocation sources</p>
+            <form className="ip-search-form" onSubmit={e => { e.preventDefault(); lookupIP(ipQuery); }}>
+              <input
+                className="ip-search-input"
+                type="text"
+                placeholder="e.g. 185.220.101.45 or 2001:db8::1"
+                value={ipQuery}
+                onChange={e => setIpQuery(e.target.value)}
+                spellCheck={false}
+                autoComplete="off"
+                autoCapitalize="off"
+              />
+              <button className="ip-search-btn" type="submit" disabled={ipLoading || !ipQuery.trim()}>
+                {ipLoading ? 'Looking up…' : 'Lookup'}
+              </button>
+            </form>
+            {ipError && <div className="ip-error">{ipError}</div>}
+          </div>
+
+          {ipLoading && (
+            <div className="ip-loading">
+              <div className="ip-spinner" />
+              <span>Querying intelligence sources…</span>
+            </div>
+          )}
+
+          {ipResult && !ipLoading && (() => {
+            const risk = ipRiskLevel(ipResult);
+            const splQuery = generateSplunkQuery('ip', ipResult.ip);
+            return (
+              <>
+                {/* Risk Banner */}
+                <div className="ip-risk-banner" style={{ borderColor: risk.color, background: `${risk.color}18` }}>
+                  <span className="ip-risk-level" style={{ color: risk.color }}>{risk.level} RISK</span>
+                  <span className="ip-risk-sep" />
+                  <span className="ip-risk-ip">{ipResult.ip}</span>
+                  {ipResult.abuse && (
+                    <span className="ip-risk-stat">AbuseIPDB <strong style={{ color: risk.color }}>{ipResult.abuse.score}/100</strong></span>
+                  )}
+                  {ipResult.vt && (
+                    <span className="ip-risk-stat">VirusTotal <strong style={{ color: ipResult.vt.malicious > 0 ? '#ef4444' : '#22c55e' }}>{ipResult.vt.malicious}/{ipResult.vt.total}</strong></span>
+                  )}
+                  {ipResult.shodan && ipResult.shodan.vulns.length > 0 && (
+                    <span className="ip-risk-stat">Shodan <strong style={{ color: '#f97316' }}>{ipResult.shodan.vulns.length} CVE{ipResult.shodan.vulns.length !== 1 ? 's' : ''}</strong></span>
+                  )}
+                  <span className="ip-risk-cached">{ipResult.cached ? '● Cached 1h' : '● Live'}</span>
+                </div>
+
+                {/* Data Grid */}
+                <div className="ip-results-grid">
+
+                  {/* Geolocation */}
+                  {ipResult.geo && (
+                    <div className="ip-card">
+                      <div className="ip-card-title">🌍 Geolocation</div>
+                      <div className="ip-rows">
+                        <div className="ip-row"><span className="ip-lbl">Location</span><span className="ip-val">{[ipResult.geo.city, ipResult.geo.region, ipResult.geo.country].filter(Boolean).join(', ')}</span></div>
+                        <div className="ip-row"><span className="ip-lbl">ISP</span><span className="ip-val">{ipResult.geo.isp}</span></div>
+                        <div className="ip-row"><span className="ip-lbl">Org</span><span className="ip-val">{ipResult.geo.org}</span></div>
+                        <div className="ip-row"><span className="ip-lbl">ASN</span><span className="ip-val ip-mono">{ipResult.geo.as}</span></div>
+                        <div className="ip-row"><span className="ip-lbl">Timezone</span><span className="ip-val">{ipResult.geo.timezone}</span></div>
+                        <div className="ip-row"><span className="ip-lbl">Coordinates</span><span className="ip-val ip-mono">{ipResult.geo.lat}, {ipResult.geo.lon}</span></div>
+                      </div>
+                      <div className="ip-flags">
+                        {ipResult.geo.proxy   && <span className="ip-flag ip-flag-warn">PROXY</span>}
+                        {ipResult.geo.hosting && <span className="ip-flag ip-flag-warn">HOSTING/DC</span>}
+                        {ipResult.geo.mobile  && <span className="ip-flag ip-flag-info">MOBILE</span>}
+                        {!ipResult.geo.proxy && !ipResult.geo.hosting && !ipResult.geo.mobile && (
+                          <span className="ip-flag ip-flag-ok">RESIDENTIAL</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* AbuseIPDB */}
+                  {ipResult.abuse ? (
+                    <div className="ip-card">
+                      <div className="ip-card-title">🛡 AbuseIPDB</div>
+                      <div className="ip-score-wrap">
+                        <span className="ip-score-num" style={{ color: risk.color }}>{ipResult.abuse.score}</span>
+                        <span className="ip-score-of">/ 100</span>
+                        <div className="ip-score-bar-bg">
+                          <div className="ip-score-bar-fill" style={{ width: `${ipResult.abuse.score}%`, background: risk.color }} />
+                        </div>
+                      </div>
+                      <div className="ip-rows">
+                        <div className="ip-row"><span className="ip-lbl">Reports</span><span className="ip-val">{ipResult.abuse.totalReports.toLocaleString()} from {ipResult.abuse.numDistinctUsers} users</span></div>
+                        {ipResult.abuse.lastReportedAt && (
+                          <div className="ip-row"><span className="ip-lbl">Last Report</span><span className="ip-val">{new Date(ipResult.abuse.lastReportedAt).toLocaleDateString()}</span></div>
+                        )}
+                        <div className="ip-row"><span className="ip-lbl">Usage Type</span><span className="ip-val">{ipResult.abuse.usageType || 'Unknown'}</span></div>
+                        {ipResult.abuse.domain && (
+                          <div className="ip-row"><span className="ip-lbl">Domain</span><span className="ip-val ip-mono">{ipResult.abuse.domain}</span></div>
+                        )}
+                        {ipResult.abuse.hostnames.length > 0 && (
+                          <div className="ip-row"><span className="ip-lbl">Hostnames</span><span className="ip-val ip-mono">{ipResult.abuse.hostnames.slice(0, 3).join(', ')}</span></div>
+                        )}
+                      </div>
+                      <div className="ip-flags">
+                        {ipResult.abuse.isTor        && <span className="ip-flag ip-flag-danger">TOR EXIT</span>}
+                        {ipResult.abuse.isWhitelisted && <span className="ip-flag ip-flag-ok">WHITELISTED</span>}
+                        {ipResult.abuse.score === 0 && !ipResult.abuse.isTor && (
+                          <span className="ip-flag ip-flag-ok">CLEAN</span>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="ip-card ip-card-nokey">
+                      <div className="ip-card-title">🛡 AbuseIPDB</div>
+                      <div className="ip-nokey">
+                        <p>Set <code>ABUSEIPDB_API_KEY</code> env var to enable abuse intelligence.</p>
+                        <a href={ipResult.links.abuseipdb} target="_blank" rel="noopener noreferrer" className="ip-ext-link">Check on AbuseIPDB ↗</a>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* VirusTotal */}
+                  {ipResult.vt ? (
+                    <div className="ip-card">
+                      <div className="ip-card-title">🧬 VirusTotal <span className="ip-card-sub">({ipResult.vt.total} engines)</span></div>
+                      <div className="ip-vt-bars">
+                        {([
+                          { label: 'Malicious',  val: ipResult.vt.malicious,  color: '#ef4444' },
+                          { label: 'Suspicious', val: ipResult.vt.suspicious, color: '#eab308' },
+                          { label: 'Harmless',   val: ipResult.vt.harmless,   color: '#22c55e' },
+                          { label: 'Undetected', val: ipResult.vt.undetected, color: '#475569' },
+                        ] as const).map(({ label, val, color }) => (
+                          <div key={label} className="ip-vt-row">
+                            <span className="ip-vt-lbl">{label}</span>
+                            <div className="ip-vt-bar-bg">
+                              <div className="ip-vt-bar-fill" style={{ width: `${(val / Math.max(ipResult.vt!.total, 1)) * 100}%`, background: color }} />
+                            </div>
+                            <span className="ip-vt-count" style={{ color }}>{val}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="ip-rows" style={{ marginTop: '10px' }}>
+                        <div className="ip-row"><span className="ip-lbl">Reputation</span><span className="ip-val" style={{ color: ipResult.vt.reputation < 0 ? '#ef4444' : '#22c55e' }}>{ipResult.vt.reputation}</span></div>
+                        {ipResult.vt.asOwner  && <div className="ip-row"><span className="ip-lbl">AS Owner</span><span className="ip-val">{ipResult.vt.asOwner}</span></div>}
+                        {ipResult.vt.network  && <div className="ip-row"><span className="ip-lbl">Network</span><span className="ip-val ip-mono">{ipResult.vt.network}</span></div>}
+                        {ipResult.vt.lastAnalysisDate && <div className="ip-row"><span className="ip-lbl">Analysed</span><span className="ip-val">{new Date(ipResult.vt.lastAnalysisDate).toLocaleDateString()}</span></div>}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="ip-card ip-card-nokey">
+                      <div className="ip-card-title">🧬 VirusTotal</div>
+                      <div className="ip-nokey">
+                        <p>Set <code>VIRUSTOTAL_API_KEY</code> env var to enable multi-engine detection.</p>
+                        <a href={ipResult.links.virustotal} target="_blank" rel="noopener noreferrer" className="ip-ext-link">Check on VirusTotal ↗</a>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Shodan */}
+                  {ipResult.shodan ? (
+                    <div className="ip-card">
+                      <div className="ip-card-title">🔭 Shodan</div>
+                      <div className="ip-rows">
+                        {ipResult.shodan.ports.length > 0 && (
+                          <div className="ip-row ip-row-wrap">
+                            <span className="ip-lbl">Open Ports</span>
+                            <div className="ip-chips">
+                              {ipResult.shodan.ports.slice(0, 16).map(p => <span key={p} className="ip-chip">{p}</span>)}
+                              {ipResult.shodan.ports.length > 16 && <span className="ip-chip ip-chip-more">+{ipResult.shodan.ports.length - 16}</span>}
+                            </div>
+                          </div>
+                        )}
+                        {ipResult.shodan.hostnames.length > 0 && (
+                          <div className="ip-row"><span className="ip-lbl">Hostnames</span><span className="ip-val ip-mono">{ipResult.shodan.hostnames.slice(0, 3).join(', ')}</span></div>
+                        )}
+                        {ipResult.shodan.org && <div className="ip-row"><span className="ip-lbl">Org</span><span className="ip-val">{ipResult.shodan.org}</span></div>}
+                        {ipResult.shodan.isp && <div className="ip-row"><span className="ip-lbl">ISP</span><span className="ip-val">{ipResult.shodan.isp}</span></div>}
+                        {ipResult.shodan.vulns.length > 0 && (
+                          <div className="ip-row ip-row-wrap">
+                            <span className="ip-lbl">CVEs</span>
+                            <div className="ip-chips">
+                              {ipResult.shodan.vulns.slice(0, 8).map(v => <span key={v} className="ip-chip ip-chip-vuln">{v}</span>)}
+                            </div>
+                          </div>
+                        )}
+                        {ipResult.shodan.data.length > 0 && (
+                          <div className="ip-services-wrap">
+                            <div className="ip-lbl" style={{ marginBottom: 6 }}>Services</div>
+                            {ipResult.shodan.data.map((s, i) => (
+                              <div key={i} className="ip-service-row">
+                                <span className="ip-chip">{s.port}/{s.transport}</span>
+                                {s.product && <span className="ip-service-name">{s.product}{s.version ? ` ${s.version}` : ''}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="ip-card ip-card-nokey">
+                      <div className="ip-card-title">🔭 Shodan</div>
+                      <div className="ip-nokey">
+                        <p>Set <code>SHODAN_API_KEY</code> env var to enable open port and service data.</p>
+                        <a href={ipResult.links.shodan} target="_blank" rel="noopener noreferrer" className="ip-ext-link">Check on Shodan ↗</a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Splunk SPL */}
+                <div className="ip-spl-section">
+                  <div className="ip-section-title">⚡ Splunk SPL</div>
+                  <div className="ip-spl-box">
+                    <code className="ip-spl-code">{splQuery}</code>
+                    <button className="ip-spl-copy" onClick={() => handleCopy(splQuery, `ipspl-${ipResult.ip}`)}>
+                      {copiedId === `ipspl-${ipResult.ip}` ? '✓ Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* External investigation links */}
+                <div className="ip-links-section">
+                  <div className="ip-section-title">🔗 Investigate Further</div>
+                  <div className="ip-links-grid">
+                    {([
+                      { label: 'AbuseIPDB',  url: ipResult.links.abuseipdb,  desc: 'Abuse reports & score' },
+                      { label: 'VirusTotal', url: ipResult.links.virustotal, desc: '90+ AV/detection engines' },
+                      { label: 'Shodan',     url: ipResult.links.shodan,     desc: 'Open ports & banners' },
+                      { label: 'Censys',     url: ipResult.links.censys,     desc: 'Certificate & port scan' },
+                      { label: 'GreyNoise',  url: ipResult.links.greynoise,  desc: 'Internet scanner check' },
+                      { label: 'Talos',      url: ipResult.links.talos,      desc: 'Cisco threat reputation' },
+                      { label: 'BGP.he.net', url: ipResult.links.bgp,        desc: 'ASN & routing data' },
+                      { label: 'IPInfo',     url: ipResult.links.ipinfo,     desc: 'Geo, ASN & privacy' },
+                    ] as const).map(({ label, url, desc }) => (
+                      <a key={label} href={url} target="_blank" rel="noopener noreferrer" className="ip-link-card">
+                        <span className="ip-link-label">{label} ↗</span>
+                        <span className="ip-link-desc">{desc}</span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+        </div>
       )}
     </>
   );

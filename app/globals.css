@@ -1558,6 +1558,8 @@ html.light .ioc-panel { background: rgba(0, 0, 0, 0.04); }
 @media (max-width: 900px) {
   .threat-strip { display: none; }
   .trends-stats { grid-template-columns: repeat(2, 1fr); }
+  .ip-links-grid { grid-template-columns: repeat(2, 1fr); }
+  .ip-results-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 640px) {
@@ -1631,4 +1633,347 @@ html.light .ioc-panel { background: rgba(0, 0, 0, 0.04); }
 
   /* Toast — allow wrap so it doesn't overflow viewport */
   .toast-alert { white-space: normal; max-width: calc(100vw - 24px); }
+
+  /* IP Lookup */
+  .ip-lookup-view { padding: 0 10px 56px; }
+  .ip-results-grid { grid-template-columns: 1fr; }
+  .ip-links-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ─── IP Lookup View ──────────────────────────────────────── */
+.ip-lookup-view {
+  margin-top: calc(var(--header-h) + var(--filter-h) + 10px);
+  max-width: 1100px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 0 20px 60px;
+}
+
+.ip-search-wrap {
+  text-align: center;
+  padding: 28px 0 24px;
+}
+
+.ip-lookup-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.ip-lookup-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 18px;
+}
+
+.ip-search-form {
+  display: flex;
+  gap: 8px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.ip-search-input {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px 16px;
+  font-size: 15px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.ip-search-input:focus { border-color: var(--accent); }
+.ip-search-input::placeholder { color: var(--text-muted); }
+
+.ip-search-btn {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  border-radius: 9px;
+  padding: 10px 22px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.ip-search-btn:hover { opacity: 0.85; }
+.ip-search-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.ip-error {
+  margin-top: 10px;
+  color: var(--sev-critical);
+  font-size: 13px;
+}
+
+.ip-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.ip-spinner {
+  width: 20px; height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+/* Risk banner */
+.ip-risk-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  padding: 12px 18px;
+  border-radius: 10px;
+  border: 1px solid;
+  margin-bottom: 18px;
+  font-size: 13px;
+}
+
+.ip-risk-level {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+.ip-risk-ip {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ip-risk-sep {
+  width: 1px; height: 14px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.ip-risk-stat {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.ip-risk-stat strong { font-weight: 700; }
+
+.ip-risk-cached {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Results grid */
+.ip-results-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.ip-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ip-card-nokey {
+  opacity: 0.75;
+}
+
+.ip-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.2px;
+}
+
+.ip-card-sub {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ip-rows { display: flex; flex-direction: column; gap: 7px; }
+
+.ip-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+}
+.ip-row-wrap { flex-wrap: wrap; }
+
+.ip-lbl {
+  color: var(--text-muted);
+  min-width: 80px;
+  flex-shrink: 0;
+  font-size: 11px;
+  padding-top: 1px;
+}
+
+.ip-val { color: var(--text-dim); word-break: break-all; }
+.ip-mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 11px; }
+
+.ip-flags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+
+.ip-flag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.4px;
+}
+.ip-flag-ok     { background: rgba(34,197,94,0.12);  color: #22c55e;  border: 1px solid rgba(34,197,94,0.3); }
+.ip-flag-warn   { background: rgba(234,179,8,0.12);  color: #eab308;  border: 1px solid rgba(234,179,8,0.3); }
+.ip-flag-danger { background: rgba(239,68,68,0.12);  color: #ef4444;  border: 1px solid rgba(239,68,68,0.3); }
+.ip-flag-info   { background: rgba(0,212,255,0.10);  color: var(--accent); border: 1px solid var(--accent-border); }
+
+/* AbuseIPDB score bar */
+.ip-score-wrap {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.ip-score-num { font-size: 36px; font-weight: 800; line-height: 1; }
+.ip-score-of  { font-size: 14px; color: var(--text-muted); }
+.ip-score-bar-bg {
+  flex: 1 1 100%;
+  height: 5px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.ip-score-bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+
+/* VirusTotal bars */
+.ip-vt-bars { display: flex; flex-direction: column; gap: 6px; }
+.ip-vt-row  { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.ip-vt-lbl  { color: var(--text-muted); width: 74px; flex-shrink: 0; font-size: 11px; }
+.ip-vt-bar-bg {
+  flex: 1;
+  height: 5px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.ip-vt-bar-fill { height: 100%; border-radius: 3px; }
+.ip-vt-count { width: 26px; text-align: right; font-weight: 600; font-size: 11px; }
+
+/* Shodan chips */
+.ip-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ip-chip {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+}
+.ip-chip-more { background: transparent; color: var(--text-muted); border-color: var(--border); }
+.ip-chip-vuln { background: rgba(239,68,68,0.1); color: #f87171; border-color: rgba(239,68,68,0.3); }
+
+.ip-services-wrap { margin-top: 8px; }
+.ip-service-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.ip-service-name { font-size: 11px; color: var(--text-dim); }
+
+/* No-key notice */
+.ip-nokey { font-size: 12px; color: var(--text-muted); display: flex; flex-direction: column; gap: 10px; }
+.ip-nokey code { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 11px; color: var(--accent); }
+.ip-ext-link { color: var(--accent); font-size: 12px; }
+.ip-ext-link:hover { text-decoration: underline; }
+
+/* Section titles */
+.ip-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+/* SPL box */
+.ip-spl-section { margin-bottom: 18px; }
+
+.ip-spl-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.ip-spl-code {
+  flex: 1;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.6;
+}
+
+.ip-spl-copy {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.12s;
+}
+.ip-spl-copy:hover { border-color: var(--accent-border); color: var(--accent); }
+
+/* External links grid */
+.ip-links-section { margin-bottom: 18px; }
+
+.ip-links-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.ip-link-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 11px 13px;
+  transition: all 0.12s;
+  text-decoration: none;
+}
+.ip-link-card:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-dim);
+}
+.ip-link-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.ip-link-desc {
+  font-size: 10px;
+  color: var(--text-muted);
 }
