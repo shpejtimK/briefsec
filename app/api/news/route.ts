@@ -228,8 +228,13 @@ async function refreshDatabase(): Promise<void> {
     }
   }
 
-  // Keep DB at 750 articles max (increased for additional feeds)
-  db.prepare(`DELETE FROM articles WHERE id NOT IN (SELECT id FROM articles ORDER BY published_at DESC LIMIT 750)`).run();
+  // Keep the newest 600 news articles and 250 MSRC advisories. Separate quotas because MSRC
+  // republishes hundreds of advisories at once and would otherwise evict the news.
+  db.prepare(`
+    DELETE FROM articles
+    WHERE id NOT IN (SELECT id FROM articles WHERE source != 'Microsoft MSRC' ORDER BY published_at DESC LIMIT 600)
+      AND id NOT IN (SELECT id FROM articles WHERE source = 'Microsoft MSRC' ORDER BY published_at DESC LIMIT 250)
+  `).run();
   // Record when we last refreshed
   db.prepare(`INSERT OR REPLACE INTO meta VALUES ('last_refresh_at', ?)`).run(String(Date.now()));
   db.close();
@@ -252,10 +257,14 @@ function readFromDb(): NewsItem[] | null {
   const db = openDb();
   if (!db) return null;
   try {
+    // Up to 400 news articles plus the 100 newest MSRC advisories — one shared limit let a burst
+    // of MSRC advisories push recent news (e.g. CISA's NetScaler zero-day advisory) out of the feed
+    const cols = 'guid, source, title, link, description, content, author, pub_date, published_at, tags, cves, page_cves, cve_scan';
     const rows = db.prepare(`
-      SELECT guid, source, title, link, description, content, author, pub_date, tags, cves, page_cves, cve_scan
-      FROM articles WHERE is_duplicate = 0
-      ORDER BY published_at DESC LIMIT 300
+      SELECT * FROM (SELECT ${cols} FROM articles WHERE is_duplicate = 0 AND source != 'Microsoft MSRC' ORDER BY published_at DESC LIMIT 400)
+      UNION ALL
+      SELECT * FROM (SELECT ${cols} FROM articles WHERE is_duplicate = 0 AND source = 'Microsoft MSRC' ORDER BY published_at DESC LIMIT 100)
+      ORDER BY published_at DESC
     `).all() as Array<{
       guid: string; source: string; title: string; link: string;
       description: string; content: string; author: string; pub_date: string;

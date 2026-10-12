@@ -272,7 +272,7 @@ The browser page auto-refreshes every 15 minutes. If new CRITICAL articles arriv
                                ┌─────────────▼──────────────┐
                                │      briefsec.sqlite       │
                                │                              │
-                               │  articles          (750 max) │
+                               │  articles  (600 news+250 MS) │
                                │  cve_tracker_cache  (12h)   │
                                │  cvss_cache         (7d)    │
                                │  cve_patch_status  (shared) │
@@ -381,7 +381,7 @@ npm start
 ## SQLite schema
 
 ```sql
--- Core articles (max 750, trimmed on each ingestion)
+-- Core articles (newest 600 news + 250 MSRC, trimmed on each ingestion)
 CREATE TABLE articles (
   id           TEXT PRIMARY KEY,
   title        TEXT,

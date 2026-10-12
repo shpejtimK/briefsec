@@ -196,8 +196,13 @@ async function run() {
     total += await ingestFeed(db, feed);
   }
 
-  // Trim old articles beyond 750 (increased for additional feeds)
-  db.prepare(`DELETE FROM articles WHERE id NOT IN (SELECT id FROM articles ORDER BY published_at DESC LIMIT 750)`).run();
+  // Keep the newest 600 news articles and 250 MSRC advisories. Separate quotas because MSRC
+  // republishes hundreds of advisories at once and would otherwise evict the news.
+  db.prepare(`
+    DELETE FROM articles
+    WHERE id NOT IN (SELECT id FROM articles WHERE source != 'Microsoft MSRC' ORDER BY published_at DESC LIMIT 600)
+      AND id NOT IN (SELECT id FROM articles WHERE source = 'Microsoft MSRC' ORDER BY published_at DESC LIMIT 250)
+  `).run();
 
   // Pull CVE IDs from the article pages of items whose feed snippet didn't include one
   if (!process.argv.includes('--no-enrich')) {
