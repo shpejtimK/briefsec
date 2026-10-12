@@ -150,8 +150,6 @@ const ATTACK_MAP: Array<{ pattern: RegExp; id: string; name: string }> = [
 
 // ─── Stack Tags & Threat Actors ───────────────────────────────────────────────
 
-const STACK_TAGS = ['Azure AD', 'Splunk', 'NetScaler', 'Citrix', 'F5/BIG-IP', 'M365', 'Windows/AD', 'Microsoft', 'Palo Alto', 'VMray', 'Cisco', 'Oracle'];
-
 // Vendors the SOC team runs — their vulnerability news is ranked above everything else in every view.
 // Matched on the headline + lede rather than the whole article, so passing mentions
 // ("disguised as Microsoft Edge", "Microsoft has warned", "Cisco Talos researchers") don't count.
@@ -656,7 +654,6 @@ export default function BriefSec() {
   const [search,        setSearch]        = useState('');
   const [timeFilter,    setTimeFilter]    = useState<'all' | '7d' | '24h'>('all');
   const [sortBy,        setSortBy]        = useState<SortBy>('newest');
-  const [stackFilter,   setStackFilter]   = useState(false);
 
   // ── UI state ──────────────────────────────────────────────────
   const [theme,          setTheme]          = useState<'dark' | 'light'>('dark');
@@ -924,7 +921,6 @@ export default function BriefSec() {
       ? data.items.filter(i => i.cves.some(c => kevSet2.has(c)))
       : data.items;
 
-    if (stackFilter) items = items.filter(i => i.tags.some(t => STACK_TAGS.includes(t)) || stackVendorsOf(i).length > 0);
     if (sourceFilter !== 'all') items = items.filter(i => i.source === sourceFilter);
     if (tagFilter !== 'all') items = items.filter(i => i.tags.includes(tagFilter));
     if (sevFilter !== 'ALL') items = items.filter(i => computeSeverity(i, kevSet2).level === sevFilter);
@@ -947,7 +943,7 @@ export default function BriefSec() {
     }
     // Stack-vendor vulnerability news always comes first, in every view and sort order
     return floatStackPriority(items, kevSet2);
-  }, [data, sourceFilter, tagFilter, sevFilter, search, timeFilter, viewMode, savedArticles, sortBy, kevSet2, stackFilter]);
+  }, [data, sourceFilter, tagFilter, sevFilter, search, timeFilter, viewMode, savedArticles, sortBy, kevSet2]);
 
   const enrichedItems = useMemo<EnrichedItem[]>(
     () => filteredItems.map(item => ({
@@ -971,7 +967,7 @@ export default function BriefSec() {
     return entries;
   }, [cveTracker, selectedProduct, cveSort]);
 
-  const hasActiveFilters = stackFilter || sourceFilter !== 'all' || tagFilter !== 'all' || search.trim() !== '' || timeFilter !== 'all' || sevFilter !== 'ALL';
+  const hasActiveFilters = sourceFilter !== 'all' || tagFilter !== 'all' || search.trim() !== '' || timeFilter !== 'all' || sevFilter !== 'ALL';
 
   // ── Handlers ──────────────────────────────────────────────────
   const togglePin = useCallback((item: NewsItem) => {
@@ -1010,7 +1006,7 @@ export default function BriefSec() {
 
   const clearFilters = useCallback(() => {
     setSourceFilter('all'); setTagFilter('all'); setSearch('');
-    setTimeFilter('all'); setSevFilter('ALL'); setStackFilter(false);
+    setTimeFilter('all'); setSevFilter('ALL');
   }, []);
 
   const updateCveStatus = useCallback(async (cveId: string, status: string) => {
@@ -1151,13 +1147,6 @@ export default function BriefSec() {
           </div>
 
           <div className="filter-right-group">
-            <button
-              className={`view-tab stack-tab${stackFilter ? ' active' : ''}`}
-              onClick={() => setStackFilter(v => !v)}
-              title="Show only articles affecting your tech stack">
-              PF
-            </button>
-            <span className="filter-sep" />
             <div className="time-tabs">
               <button className={`view-tab${timeFilter === 'all' ? ' active' : ''}`} onClick={() => setTimeFilter('all')}>All</button>
               <button className={`view-tab${timeFilter === '7d'  ? ' active' : ''}`} onClick={() => setTimeFilter('7d')}>7d</button>

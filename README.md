@@ -181,8 +181,6 @@ Articles are automatically tagged when content matches your technology stack:
 
 `Azure AD` · `Splunk` · `NetScaler` · `F5/BIG-IP` · `M365` · `Windows/AD` · `Financial Sector` · `Regulatory`
 
-The **My Stack** toggle in the filter bar shows only articles matching any of these tags.
-
 **Stack vendor priority:** vulnerability news about the SOC's vendors — Citrix, Palo Alto, Splunk, VMray, Microsoft, Cisco, Oracle — is always ranked first, in every view and sort order, and marked with a green ★ vendor badge. The vendor has to appear in the headline or lede (passing mentions such as "Microsoft has warned" or "disguised as Microsoft Edge" don't count). Raw Microsoft MSRC advisories are ranked below that news: exploited/KEV-listed ones join the top group, remote code execution ones come right after it, and the rest stay in normal order.
 
 ---
@@ -193,7 +191,6 @@ The **My Stack** toggle in the filter bar shows only articles matching any of th
 | View | Feed · Saved · KEV · Stack CVEs · Trends |
 | Time | All · 7 days · 24 hours |
 | Sort | Newest · By Risk |
-| My Stack | Toggle — OR-filter across all 6 stack tags |
 | Severity | ALL · CRITICAL · HIGH · MEDIUM · LOW |
 | Source | Per-source pills |
 | Tag | Per-tag pills (all detected tags) |

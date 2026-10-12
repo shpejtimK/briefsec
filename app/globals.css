@@ -623,7 +623,7 @@ button { font-family: inherit; cursor: pointer; border: none; outline: none; }
   white-space: nowrap;
 }
 
-/* Stack-vendor vulnerability news (ranked first) — same green as the PF toggle */
+/* Stack-vendor vulnerability news (ranked first) */
 .stack-badge {
   background: rgba(16, 185, 129, 0.12);
   border: 1px solid rgba(16, 185, 129, 0.45);
@@ -1162,13 +1162,7 @@ html.light .ioc-panel { background: rgba(0, 0, 0, 0.04); }
   flex-shrink: 0;
 }
 
-/* ─── Stack / CVE Tab Overrides ───────────────────────────── */
-.stack-tab.active {
-  background: rgba(16, 185, 129, 0.12);
-  border-color: rgba(16, 185, 129, 0.45);
-  color: #34d399;
-}
-
+/* ─── CVE Tab Overrides ───────────────────────────────────── */
 .cve-tab.active {
   background: rgba(234, 179, 8, 0.1);
   border-color: rgba(234, 179, 8, 0.4);
