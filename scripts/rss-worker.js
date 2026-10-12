@@ -4,6 +4,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const Parser = require('rss-parser');
 const Database = require('better-sqlite3');
+const { enrichPendingArticles, ensureEnrichmentColumns, extractCVEs } = require('../lib/cve-enrich');
 
 const RSS_FEEDS = [
   { url: 'https://krebsonsecurity.com/feed/', name: 'Krebs on Security' },
@@ -93,11 +94,6 @@ function detectTags(title, description) {
   return tags;
 }
 
-function extractCVEs(text) {
-  const matches = text.match(/CVE-\d{4}-\d{4,}/gi) || [];
-  return [...new Set(matches.map(c => c.toUpperCase()))];
-}
-
 function openDatabase() {
   const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '..', 'db', 'briefsec.sqlite');
   const db = new Database(dbPath);
@@ -125,6 +121,7 @@ function openDatabase() {
     CREATE INDEX IF NOT EXISTS idx_hash ON articles(content_hash);
   `);
   try { db.exec(`ALTER TABLE articles ADD COLUMN content TEXT DEFAULT ''`); } catch { /* column already exists */ }
+  ensureEnrichmentColumns(db);
   return db;
 }
 
@@ -167,13 +164,14 @@ async function ingestFeed(db, feedConfig) {
       const publishedAt = Math.floor(new Date(pubDate).getTime() / 1000) || Math.floor(Date.now() / 1000);
 
       const tags = detectTags(title, content);
-      const cves = extractCVEs(`${title} ${content}`);
+      // Full feed text, not the 3000-char excerpt — long posts often name the CVE further down
+      const cves = extractCVEs(`${title} ${fullText}`);
       const contentHash = crypto.createHash('sha256')
         .update((title + description).toLowerCase())
         .digest('hex');
 
       const dup = checkDup.get(contentHash, name);
-      if (dup) return;
+      if (dup) continue;
 
       try {
         upsert.run(guid, name, title, link, description, content, author, pubDate, publishedAt,
@@ -200,14 +198,27 @@ async function run() {
 
   // Trim old articles beyond 750 (increased for additional feeds)
   db.prepare(`DELETE FROM articles WHERE id NOT IN (SELECT id FROM articles ORDER BY published_at DESC LIMIT 750)`).run();
+
+  // Pull CVE IDs from the article pages of items whose feed snippet didn't include one
+  if (!process.argv.includes('--no-enrich')) {
+    try {
+      await enrichPendingArticles(db, { limit: 60, log: true });
+    } catch (err) {
+      console.warn(`[CVE enrich] ${err.message}`);
+    }
+  }
+
   db.close();
   console.log(`[Done] Total new: ${total}`);
 }
 
-run().catch(console.error);
-
 if (process.argv.includes('--watch')) {
+  run().catch(console.error);
   const interval = parseInt(process.env.WORKER_INTERVAL_MINUTES || '15', 10) * 60 * 1000;
   console.log(`[Watch] Re-running every ${interval / 60000} minutes...`);
   setInterval(() => run().catch(console.error), interval);
+} else {
+  // rss-parser leaves keep-alive sockets open (e.g. after a feed times out), which would keep a
+  // one-shot run — and the startup seed in start-prod.sh — from ever exiting
+  run().catch(console.error).finally(() => process.exit(0));
 }

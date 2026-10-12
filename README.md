@@ -183,6 +183,8 @@ Articles are automatically tagged when content matches your technology stack:
 
 The **My Stack** toggle in the filter bar shows only articles matching any of these tags.
 
+**Stack vendor priority:** vulnerability news about the SOC's vendors — Citrix, Palo Alto, Splunk, VMray, Microsoft, Cisco, Oracle — is always ranked first, in every view and sort order, and marked with a green ★ vendor badge. The vendor has to appear in the headline or lede (passing mentions such as "Microsoft has warned" or "disguised as Microsoft Edge" don't count). Raw Microsoft MSRC advisories are ranked below that news: exploited/KEV-listed ones join the top group, remote code execution ones come right after it, and the rest stay in normal order.
+
 ---
 
 ### Filters & Search
@@ -282,6 +284,7 @@ The browser page auto-refreshes every 15 minutes. If new CRITICAL articles arriv
 
 **Data flow:**
 1. `rss-worker.js` (optional, standalone) or the API route itself ingests feeds into SQLite
+   - Articles whose feed snippet has no CVE ID get their article page fetched once (`lib/cve-enrich.js`) and the CVE IDs from the article body are stored alongside (The Hacker News and Dark Reading block automated reads, so those show a "CVE: check article" link instead)
 2. `/api/news` returns articles — from SQLite first, live RSS if DB is empty
 3. `/api/kev` fetches the CISA KEV JSON catalog every 6 hours
 4. `/api/cve-tracker` queries NVD API for each stack product with a 12-hour SQLite cache
@@ -322,6 +325,8 @@ briefsec/
 │   ├── page.tsx                   # Main dashboard — all UI, logic, filters
 │   ├── layout.tsx                 # HTML shell, metadata
 │   └── globals.css                # Dark security-analyst theme (pure CSS)
+├── lib/
+│   └── cve-enrich.js              # Fetches article pages to find CVE IDs missing from feed snippets
 ├── scripts/
 │   └── rss-worker.js              # Standalone ingestion script (optional background job)
 ├── db/

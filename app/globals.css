@@ -623,6 +623,20 @@ button { font-family: inherit; cursor: pointer; border: none; outline: none; }
   white-space: nowrap;
 }
 
+/* Stack-vendor vulnerability news (ranked first) — same green as the PF toggle */
+.stack-badge {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  color: #34d399;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+html.light .stack-badge { color: #047857; }
+
 /* ─── NEW Badge ───────────────────────────────────────────── */
 .new-badge {
   background: rgba(34, 197, 94, 0.12);
@@ -722,6 +736,8 @@ button { font-family: inherit; cursor: pointer; border: none; outline: none; }
   cursor: default;
   font-style: italic;
 }
+a.cve-title-tag--unknown { cursor: pointer; }
+html.light .cve-title-tag:not(.cve-title-tag--unknown) { color: #b91c1c; }
 
 /* CVE badges now link to NVD */
 .cve-badges { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }

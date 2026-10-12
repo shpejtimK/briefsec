@@ -8,6 +8,8 @@ interface NewsItem {
   id: string; title: string; link: string; description: string;
   content: string; pubDate: string; source: string; tags: string[];
   cves: string[]; author: string;
+  // Article page checked for CVE IDs: pending | found | none | unavailable
+  cveStatus?: string;
 }
 
 type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
@@ -21,6 +23,7 @@ interface AttackTechnique  { id: string; name: string; }
 interface EnrichedItem {
   item: NewsItem; severity: SeverityResult; iocs: IOCResult;
   techniques: AttackTechnique[]; isNew: boolean;
+  stackVendors: string[]; isPriority: boolean;
 }
 
 interface FeedData {
@@ -149,8 +152,22 @@ const ATTACK_MAP: Array<{ pattern: RegExp; id: string; name: string }> = [
 
 const STACK_TAGS = ['Azure AD', 'Splunk', 'NetScaler', 'Citrix', 'F5/BIG-IP', 'M365', 'Windows/AD', 'Microsoft', 'Palo Alto', 'VMray', 'Cisco', 'Oracle'];
 
-// Tags for vendors the SOC team uses — CVE articles from these float to the top in PF mode
-const PRIORITY_VENDOR_TAGS = new Set(['Citrix', 'NetScaler', 'Palo Alto', 'Splunk', 'VMray', 'Microsoft', 'Azure AD', 'M365', 'Windows/AD', 'Cisco', 'Oracle']);
+// Vendors the SOC team runs — their vulnerability news is ranked above everything else in every view.
+// Matched on the headline + lede rather than the whole article, so passing mentions
+// ("disguised as Microsoft Edge", "Microsoft has warned", "Cisco Talos researchers") don't count.
+const STACK_VENDORS: Array<{ name: string; regex: RegExp }> = [
+  { name: 'Citrix',    regex: /\bcitrix|netscaler|xenapp|xendesktop|sharefile/i },
+  { name: 'Palo Alto', regex: /palo.?alto|\bpan-?os\b|globalprotect|\bpanorama\b|cortex.?(xdr|xsoar|xsiam)|prisma.?(cloud|access)/i },
+  { name: 'Splunk',    regex: /\bsplunk/i },
+  { name: 'VMray',     regex: /\bvmray/i },
+  { name: 'Microsoft', regex: /\bmicrosoft|\bwindows\b|exchange.?server|exchange.?online|\bsharepoint|\bazure\b|\bentra\b|\bm365\b|office.?365|\boutlook\b|hyper-v|\biis\b|asp\.net|\.net.?(framework|core)|sql.?server|active.?directory|\bintune\b|\bkerberos\b|\bntlm\b|patch.?tuesday/i },
+  { name: 'Cisco',     regex: /\bcisco|\bios.?x[er]\b|\basa\b|firepower|\bwebex|meraki|anyconnect|identity.?services.?engine|\bnx-?os\b/i },
+  { name: 'Oracle',    regex: /\boracle|weblogic|peoplesoft|e-business.?suite|jd.?edwards|virtualbox/i },
+];
+const VENDOR_IMPERSONATION = /\b(?:disguised as|posing as|masquerading as|impersonat\w*|fake|spoofed|lookalike)\s+(?:an?\s+|the\s+)?[\w.-]+(?:\s+[\w.-]+)?/gi;
+const VENDOR_RESEARCH_ARM  = /\b(?:microsoft threat intelligence|microsoft security response center|cisco talos|talos|unit ?42)\b/gi;
+const VENDOR_ATTRIBUTION   = /\b(?:microsoft|cisco|palo alto networks|oracle|citrix|splunk|vmray)(?:'s)?\s+(?:has\s+|have\s+)?(?:warned|warns|said|says|reported|reports|observed|spotted|discovered|found|detected|researchers?)\b/gi;
+const VULN_STORY = /cve-\d{4}-\d+|vulnerab|flaw|\bbugs?\b|exploit|zero.?days?|\b0.?days?\b|\brce\b|remote code|patch|security update|advisory|bypass|injection|overflow|privilege/i;
 
 const THREAT_ACTORS: Array<{ name: string; regex: RegExp; origin: string; sector: string }> = [
   { name: 'Lazarus Group',      regex: /lazarus|apt.?38|bluenoroff/i,          origin: 'DPRK',        sector: 'Financial / Crypto' },
@@ -223,6 +240,40 @@ function computeSeverity(item: NewsItem, kevSet: Set<string>): SeverityResult {
   if (item.tags.includes('Malware') || item.tags.includes('Phishing') || item.tags.includes('Breach')) return { level: 'MEDIUM', isKev: false };
   if (item.tags.includes('Patch Tuesday')) return { level: 'MEDIUM', isKev: false };
   return { level: 'LOW', isKev: false };
+}
+
+// Which of the SOC stack vendors an article is about
+function stackVendorsOf(item: NewsItem): string[] {
+  // Chromium entries are Google's V8/Blink bugs re-published by MSRC for Edge
+  if (item.source === 'Microsoft MSRC') return /^chromium:/i.test(item.title) ? [] : ['Microsoft'];
+  const lede = item.description.slice(0, 300).replace(VENDOR_ATTRIBUTION, ' ');
+  const text = `${item.title} ${lede}`.replace(VENDOR_IMPERSONATION, ' ').replace(VENDOR_RESEARCH_ARM, ' ');
+  return STACK_VENDORS.filter(v => v.regex.test(text)).map(v => v.name);
+}
+
+// Feed rank for stack-vendor vulnerability news, ahead of everything else:
+//   0 — stack-vendor vulnerability news, and MSRC advisories that are exploited / KEV-listed
+//   1 — MSRC remote code execution advisories (MSRC posts 100+ advisories per Patch Tuesday,
+//       so the raw advisories sit below the news coverage and routine EoP/info-disclosure ones aren't floated)
+//   2 — everything else
+function stackPriority(item: NewsItem, kevSet: Set<string>): 0 | 1 | 2 {
+  if (stackVendorsOf(item).length === 0) return 2;
+  if (item.source === 'Microsoft MSRC') {
+    if (computeSeverity(item, kevSet).level === 'CRITICAL') return 0;
+    return /remote code execution/i.test(item.title) ? 1 : 2;
+  }
+  return item.cves.length > 0 || VULN_STORY.test(`${item.title} ${item.description.slice(0, 300)}`) ? 0 : 2;
+}
+
+function isStackPriority(item: NewsItem, kevSet: Set<string>): boolean {
+  return stackPriority(item, kevSet) < 2;
+}
+
+// Stack-vendor vulnerability news first; each tier keeps the incoming order (newest / by risk)
+function floatStackPriority(items: NewsItem[], kevSet: Set<string>): NewsItem[] {
+  const tiers: NewsItem[][] = [[], [], []];
+  for (const item of items) tiers[stackPriority(item, kevSet)].push(item);
+  return tiers.flat();
 }
 
 function detectTechniques(text: string): AttackTechnique[] {
@@ -826,9 +877,10 @@ export default function BriefSec() {
   const criticalThisWeek = useMemo(() => {
     if (!data) return [];
     const cutoff = Date.now() - 7 * 86_400_000;
-    return data.items
-      .filter(i => new Date(i.pubDate).getTime() > cutoff && computeSeverity(i, kevSet2).level === 'CRITICAL')
-      .slice(0, 8);
+    return floatStackPriority(
+      data.items.filter(i => new Date(i.pubDate).getTime() > cutoff && computeSeverity(i, kevSet2).level === 'CRITICAL'),
+      kevSet2,
+    ).slice(0, 8);
   }, [data, kevSet2]);
 
   const activeActors = useMemo(() => {
@@ -862,14 +914,17 @@ export default function BriefSec() {
   // ── Filtered items ────────────────────────────────────────────
   const filteredItems = useMemo(() => {
     if (viewMode === 'saved') {
-      return [...savedArticles.values()].sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
+      return floatStackPriority(
+        [...savedArticles.values()].sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime()),
+        kevSet2,
+      );
     }
     if (!data) return [];
     let items = viewMode === 'kev'
       ? data.items.filter(i => i.cves.some(c => kevSet2.has(c)))
       : data.items;
 
-    if (stackFilter) items = items.filter(i => i.tags.some(t => STACK_TAGS.includes(t)));
+    if (stackFilter) items = items.filter(i => i.tags.some(t => STACK_TAGS.includes(t)) || stackVendorsOf(i).length > 0);
     if (sourceFilter !== 'all') items = items.filter(i => i.source === sourceFilter);
     if (tagFilter !== 'all') items = items.filter(i => i.tags.includes(tagFilter));
     if (sevFilter !== 'ALL') items = items.filter(i => computeSeverity(i, kevSet2).level === sevFilter);
@@ -890,15 +945,8 @@ export default function BriefSec() {
         return diff !== 0 ? diff : new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime();
       });
     }
-    // PF mode: vendor CVE articles bubble to the top regardless of sort order
-    if (stackFilter) {
-      items = [...items].sort((a, b) => {
-        const aBoost = (a.cves.length > 0 && a.tags.some(t => PRIORITY_VENDOR_TAGS.has(t))) ? 1 : 0;
-        const bBoost = (b.cves.length > 0 && b.tags.some(t => PRIORITY_VENDOR_TAGS.has(t))) ? 1 : 0;
-        return bBoost - aBoost;
-      });
-    }
-    return items;
+    // Stack-vendor vulnerability news always comes first, in every view and sort order
+    return floatStackPriority(items, kevSet2);
   }, [data, sourceFilter, tagFilter, sevFilter, search, timeFilter, viewMode, savedArticles, sortBy, kevSet2, stackFilter]);
 
   const enrichedItems = useMemo<EnrichedItem[]>(
@@ -908,6 +956,8 @@ export default function BriefSec() {
       iocs: extractIOCs(`${item.description} ${item.content || ''}`),
       techniques: detectTechniques(`${item.title} ${item.description}`),
       isNew: lastVisit > 0 && new Date(item.pubDate).getTime() > lastVisit,
+      stackVendors: stackVendorsOf(item),
+      isPriority: isStackPriority(item, kevSet2),
     })),
     [filteredItems, kevSet2, lastVisit],
   );
@@ -1460,7 +1510,7 @@ export default function BriefSec() {
       {/* ── Articles Feed ── */}
       {!loading && !error && enrichedItems.length > 0 && (viewMode === 'feed' || viewMode === 'saved' || viewMode === 'kev') && (
         <main className="news-grid">
-          {enrichedItems.map(({ item, severity, iocs, techniques, isNew }) => {
+          {enrichedItems.map(({ item, severity, iocs, techniques, isNew, stackVendors, isPriority }) => {
             const srcStyle = getSourceStyle(item.source);
             const isSaved = savedArticles.has(item.id);
             const isPinned = pinnedArticles.has(item.id);
@@ -1482,6 +1532,11 @@ export default function BriefSec() {
                     <span className="source-badge" style={{ background: srcStyle.bg, color: srcStyle.color }}>
                       {item.source}
                     </span>
+                    {isPriority && (
+                      <span className="stack-badge" title="Vulnerability news for a vendor in your stack — ranked first">
+                        ★ {stackVendors.join(' · ')}
+                      </span>
+                    )}
                   </div>
                   <div className="card-meta">
                     {isNew && <span className="new-badge">NEW</span>}
@@ -1512,13 +1567,18 @@ export default function BriefSec() {
                   {item.cves.length > 4 && (
                     <span className="cve-title-tag cve-title-tag--more">+{item.cves.length - 4}</span>
                   )}
-                  {item.cves.length === 0 &&
-                   stackFilter &&
-                   item.tags.some(t => PRIORITY_VENDOR_TAGS.has(t)) &&
-                   (item.tags.includes('Vulnerability') || item.tags.includes('Zero-Day') || item.tags.includes('CVE')) && (
-                    <span className="cve-title-tag cve-title-tag--unknown" title="CVE ID not available in RSS feed — click Read to see full advisory">
-                      CVE ID in article ↗
-                    </span>
+                  {/* Stack-vendor vuln story with no CVE yet: page not scanned yet, or the site blocks automated reads */}
+                  {item.cves.length === 0 && isPriority && item.cveStatus !== 'none' && (
+                    item.cveStatus === 'pending' ? (
+                      <span className="cve-title-tag cve-title-tag--unknown" title="Looking up the CVE ID in the full article — refresh in a few minutes">
+                        CVE: checking…
+                      </span>
+                    ) : (
+                      <a className="cve-title-tag cve-title-tag--unknown" href={item.link} target="_blank" rel="noopener noreferrer"
+                        title="The feed has no CVE ID and this site blocks automated reads — open the article to check for one">
+                        CVE: check article ↗
+                      </a>
+                    )
                   )}
                 </h2>
 

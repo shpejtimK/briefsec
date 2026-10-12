@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import Parser from 'rss-parser';
 import path from 'path';
 import crypto from 'crypto';
+import { enrichPendingArticles, ensureEnrichmentColumns, extractCVEs } from '@/lib/cve-enrich';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -16,6 +17,8 @@ interface NewsItem {
   source: string;
   tags: string[];
   cves: string[];
+  // Whether the article page was checked for CVE IDs: pending | found | none | unavailable
+  cveStatus: string;
   author: string;
 }
 
@@ -60,6 +63,7 @@ const parser = new Parser({
 
 // Guard against concurrent refreshes within the same server process
 let refreshPromise: Promise<void> | null = null;
+let enrichPromise: Promise<void> | null = null;
 
 function stripHtml(html: string): string {
   return (html || '')
@@ -114,11 +118,6 @@ function detectTags(title: string, description: string): string[] {
   return tags;
 }
 
-function extractCVEs(text: string): string[] {
-  const matches = text.match(/CVE-\d{4}-\d{4,}/gi) || [];
-  return [...new Set(matches.map(c => c.toUpperCase()))];
-}
-
 function openDb() {
   try {
     const Database = require('better-sqlite3');
@@ -152,6 +151,7 @@ function openDb() {
       CREATE INDEX IF NOT EXISTS idx_hash ON articles(content_hash);
     `);
     try { db.exec(`ALTER TABLE articles ADD COLUMN content TEXT DEFAULT ''`); } catch { /* already exists */ }
+    ensureEnrichmentColumns(db);
     return db;
   } catch {
     return null;
@@ -207,7 +207,8 @@ async function refreshDatabase(): Promise<void> {
       const pubDate = item.pubDate || item.isoDate || new Date().toISOString();
       const publishedAt = Math.floor(new Date(pubDate).getTime() / 1000) || Math.floor(Date.now() / 1000);
       const tags = detectTags(title, content);
-      const cves = extractCVEs(`${title} ${content}`);
+      // Full feed text, not the 3000-char excerpt — long posts often name the CVE further down
+      const cves = extractCVEs(`${title} ${fullText}`);
       const contentHash = crypto.createHash('sha256')
         .update((title + description).toLowerCase()).digest('hex');
 
@@ -232,6 +233,19 @@ async function refreshDatabase(): Promise<void> {
   // Record when we last refreshed
   db.prepare(`INSERT OR REPLACE INTO meta VALUES ('last_refresh_at', ?)`).run(String(Date.now()));
   db.close();
+
+  // Fetch article pages for CVE IDs in the background — too slow to hold the response for
+  if (!enrichPromise) {
+    enrichPromise = (async () => {
+      const enrichDb = openDb();
+      if (!enrichDb) return;
+      try {
+        await enrichPendingArticles(enrichDb, { limit: 40 });
+      } finally {
+        enrichDb.close();
+      }
+    })().catch(() => { /* retried on next refresh */ }).finally(() => { enrichPromise = null; });
+  }
 }
 
 function readFromDb(): NewsItem[] | null {
@@ -239,28 +253,34 @@ function readFromDb(): NewsItem[] | null {
   if (!db) return null;
   try {
     const rows = db.prepare(`
-      SELECT guid, source, title, link, description, content, author, pub_date, tags, cves
+      SELECT guid, source, title, link, description, content, author, pub_date, tags, cves, page_cves, cve_scan
       FROM articles WHERE is_duplicate = 0
       ORDER BY published_at DESC LIMIT 300
     `).all() as Array<{
       guid: string; source: string; title: string; link: string;
       description: string; content: string; author: string; pub_date: string;
-      tags: string; cves: string;
+      tags: string; cves: string; page_cves: string; cve_scan: string;
     }>;
     db.close();
     if (rows.length === 0) return null;
-    return rows.map(r => ({
-      id: `${r.source}::${r.guid}`,
-      title: r.title,
-      link: r.link,
-      description: r.description,
-      content: r.content || r.description,
-      pubDate: r.pub_date,
-      source: r.source,
-      tags: JSON.parse(r.tags || '[]'),
-      cves: JSON.parse(r.cves || '[]'),
-      author: r.author,
-    }));
+    return rows.map(r => {
+      // Feed CVEs first, then any found on the article page
+      const cves: string[] = [...new Set<string>([...JSON.parse(r.cves || '[]'), ...JSON.parse(r.page_cves || '[]')])];
+      const tags: string[] = JSON.parse(r.tags || '[]');
+      return {
+        id: `${r.source}::${r.guid}`,
+        title: r.title,
+        link: r.link,
+        description: r.description,
+        content: r.content || r.description,
+        pubDate: r.pub_date,
+        source: r.source,
+        tags: cves.length > 0 && !tags.includes('CVE') ? ['CVE', ...tags] : tags,
+        cves,
+        cveStatus: r.cve_scan || 'pending',
+        author: r.author,
+      };
+    });
   } catch {
     db.close();
     return null;
