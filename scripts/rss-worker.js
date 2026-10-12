@@ -1,229 +1,51 @@
 /* eslint-disable no-console */
+// Background refresh: hacking news, CVEs (NVD + CISA KEV) and CVE lookups on article pages.
+//
+//   node scripts/rss-worker.js               one run, then exit
+//   node scripts/rss-worker.js --watch       run every WORKER_INTERVAL_MINUTES (default 5)
+//   node scripts/rss-worker.js --no-enrich   skip the article-page CVE lookups (fast startup seed)
 const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
-const Parser = require('rss-parser');
 const Database = require('better-sqlite3');
-const { enrichPendingArticles, ensureEnrichmentColumns, extractCVEs } = require('../lib/cve-enrich');
-
-const RSS_FEEDS = [
-  { url: 'https://krebsonsecurity.com/feed/', name: 'Krebs on Security' },
-  { url: 'https://feeds.feedburner.com/TheHackersNews', name: 'The Hacker News' },
-  { url: 'https://www.bleepingcomputer.com/feed/', name: 'BleepingComputer' },
-  { url: 'https://www.schneier.com/feed/atom/', name: 'Schneier on Security' },
-  { url: 'https://isc.sans.edu/rssfeed_full.xml', name: 'SANS ISC' },
-  { url: 'https://www.cisa.gov/cybersecurity-advisories/all.xml', name: 'CISA' },
-  { url: 'https://grahamcluley.com/feed/', name: 'Graham Cluley' },
-  { url: 'https://arstechnica.com/security/feed/', name: 'Ars Technica Security' },
-  { url: 'https://nakedsecurity.sophos.com/feed/', name: 'Naked Security' },
-  { url: 'https://www.troyhunt.com/rss/', name: 'Troy Hunt' },
-  { url: 'https://securityweek.com/feed/', name: 'SecurityWeek' },
-  { url: 'https://www.darkreading.com/rss.xml', name: 'Dark Reading' },
-  // Vendor advisories and government CERTs
-  { url: 'https://api.msrc.microsoft.com/update-guide/rss', name: 'Microsoft MSRC' },
-  { url: 'https://www.cert.at/de/warnungen/rss/', name: 'CERT.at' },
-  { url: 'https://www.enisa.europa.eu/publications/security-advisories/rss', name: 'ENISA' },
-];
-
-const parser = new Parser({
-  customFields: {
-    item: [
-      ['media:content', 'mediaContent', { keepArray: true }],
-      ['media:thumbnail', 'mediaThumbnail'],
-      ['dc:creator', 'creator'],
-      ['content:encoded', 'contentEncoded'],
-    ],
-  },
-  timeout: 15000,
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
-  },
-});
-
-function stripHtml(html) {
-  return (html || '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#\d+;/g, ' ')
-    .replace(/\s+/g, ' ').trim();
-}
-
-function truncate(text, limit) {
-  if (text.length <= limit) return text;
-  const slice = text.slice(0, limit);
-  const lastSentence = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('! '), slice.lastIndexOf('? '));
-  if (lastSentence > limit * 0.5) return slice.slice(0, lastSentence + 1).trimEnd() + '...';
-  const lastSpace = slice.lastIndexOf(' ');
-  return (lastSpace > 0 ? slice.slice(0, lastSpace) : slice) + '...';
-}
-
-function detectTags(title, description) {
-  const text = `${title} ${description}`.toLowerCase();
-  const tags = [];
-  if (/\bcve-\d{4}-\d+\b/i.test(text)) tags.push('CVE');
-  if (/zero.?day|0day/.test(text)) tags.push('Zero-Day');
-  if (/ransomware/.test(text)) tags.push('Ransomware');
-  else if (/\bmalware\b|\btrojan\b|\bbackdoor\b|\bspyware\b|\bbotnet\b|\brootkit\b/.test(text)) tags.push('Malware');
-  if (/phish/.test(text)) tags.push('Phishing');
-  if (/\bbreach\b|\bdata.?leak\b|exfiltrat|stolen data|compromised.*data/.test(text)) tags.push('Breach');
-  if (/vulnerabilit|\bexploit\b|\brce\b|remote code exec|buffer overflow|sql inject|cross.site|lfi\b|ssrf\b/.test(text)) tags.push('Vulnerability');
-  if (/patch tuesday|microsoft.*security update/.test(text)) tags.push('Patch Tuesday');
-  if (/\bapt\b|advanced persistent threat/.test(text)) tags.push('APT');
-  if (/nation.?state|state.?sponsor/.test(text)) tags.push('Nation-State');
-  if (/supply chain|dependency confus|typosquat|open.?source.*(attack|malicious)/.test(text)) tags.push('Supply Chain');
-  if (/\bai\b|machine learning|\bllm\b|deepfake|generative/.test(text)) tags.push('AI/ML');
-  if (/\bcloud\b|\baws\b|\bazure\b|\bgcp\b|\bkubernetes\b|\bdocker\b/.test(text)) tags.push('Cloud');
-  if (/privacy|\bgdpr\b|\bccpa\b|data protect/.test(text)) tags.push('Privacy');
-  if (/\bcritical infrastructure\b|ics\b|\bscada\b|\bots\b/.test(text)) tags.push('ICS/OT');
-  // Stack-specific relevance tags
-  if (/azure.?ad|azure.?active.?directory|entra.?id|microsoft.?entra/.test(text)) tags.push('Azure AD');
-  if (/\bsplunk\b/.test(text)) tags.push('Splunk');
-  if (/netscaler|citrix.*(adc|gateway|ica|bleed)|citrix.*(vuln|exploit|advis|patch)/.test(text)) tags.push('NetScaler');
-  if (/\bcitrix\b/.test(text)) tags.push('Citrix');
-  if (/big.?ip|f5.*(vuln|exploit|advis|patch|security)|f5.?labs/.test(text)) tags.push('F5/BIG-IP');
-  if (/microsoft.?365|office.?365|\bo365\b|sharepoint.?online|exchange.?online|microsoft.?teams|outlook.?online/.test(text)) tags.push('M365');
-  if (/windows.?server|active.?directory|domain.?controller|\bkerberos\b|group.?policy|\bntlm\b/.test(text)) tags.push('Windows/AD');
-  if (/\bmicrosoft\b/.test(text)) tags.push('Microsoft');
-  if (/palo.?alto|pan.?os\b|panorama|cortex.?xdr|prisma.?cloud/.test(text)) tags.push('Palo Alto');
-  if (/\bvmray\b/.test(text)) tags.push('VMray');
-  if (/\bcisco\b/.test(text)) tags.push('Cisco');
-  if (/\boracle\b|weblogic/.test(text)) tags.push('Oracle');
-  if (/financial.*(sector|institution|service|attack|fraud|crime)|banking.*(security|threat|fraud)|pci.?dss|\bswift\b.*network|payment.?card.*fraud|financial.?market/.test(text)) tags.push('Financial Sector');
-  if (/\bdora\b|digital.?operational.?resilience|\bnis2\b|nis.?2.?directive|financial.*(authorit|regulat)|cyber.?resilience.?act|regulatory.*(framework|compliance|mandate)/.test(text)) tags.push('Regulatory');
-  return tags;
-}
+const { refreshNews } = require('../lib/news-feed');
+const { refreshCves } = require('../lib/cve-feed');
+const { enrichPendingArticles } = require('../lib/cve-enrich');
 
 function openDatabase() {
   const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '..', 'db', 'briefsec.sqlite');
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS articles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      guid TEXT NOT NULL,
-      source TEXT NOT NULL,
-      title TEXT NOT NULL,
-      link TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      content TEXT DEFAULT '',
-      author TEXT DEFAULT '',
-      pub_date TEXT,
-      published_at INTEGER,
-      tags TEXT DEFAULT '[]',
-      cves TEXT DEFAULT '[]',
-      content_hash TEXT,
-      is_duplicate INTEGER DEFAULT 0,
-      created_at INTEGER DEFAULT (strftime('%s', 'now')),
-      UNIQUE(source, guid)
-    );
-    CREATE INDEX IF NOT EXISTS idx_pub ON articles(published_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_hash ON articles(content_hash);
-  `);
-  try { db.exec(`ALTER TABLE articles ADD COLUMN content TEXT DEFAULT ''`); } catch { /* column already exists */ }
-  ensureEnrichmentColumns(db);
   return db;
 }
 
-async function ingestFeed(db, feedConfig) {
-  const { url, name } = feedConfig;
-  let feed;
-  try {
-    feed = await parser.parseURL(url);
-  } catch (err) {
-    console.warn(`[SKIP] ${name}: ${err.message}`);
-    return 0;
-  }
-
-  const upsert = db.prepare(`
-    INSERT INTO articles (guid, source, title, link, description, content, author, pub_date, published_at, tags, cves, content_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(source, guid) DO UPDATE SET
-      title = excluded.title,
-      description = excluded.description,
-      content = excluded.content,
-      tags = excluded.tags,
-      cves = excluded.cves
-  `);
-
-  const checkDup = db.prepare(`SELECT id FROM articles WHERE content_hash = ? AND source != ? LIMIT 1`);
-
-  let count = 0;
-  const insertMany = db.transaction((items) => {
-    for (const item of items) {
-      const title = stripHtml(item.title || '');
-      const fullText = stripHtml(
-        item.contentEncoded || item['content:encoded'] || item.contentSnippet || item.summary || item.content || ''
-      );
-      const description = truncate(fullText, 600);
-      const content = truncate(fullText, 3000);
-      const author = item.creator || item.author || '';
-      const link = item.link || item.guid || '';
-      const guid = item.guid || item.id || item.link || title;
-      const pubDate = item.pubDate || item.isoDate || new Date().toISOString();
-      const publishedAt = Math.floor(new Date(pubDate).getTime() / 1000) || Math.floor(Date.now() / 1000);
-
-      const tags = detectTags(title, content);
-      // Full feed text, not the 3000-char excerpt — long posts often name the CVE further down
-      const cves = extractCVEs(`${title} ${fullText}`);
-      const contentHash = crypto.createHash('sha256')
-        .update((title + description).toLowerCase())
-        .digest('hex');
-
-      const dup = checkDup.get(contentHash, name);
-      if (dup) continue;
-
-      try {
-        upsert.run(guid, name, title, link, description, content, author, pubDate, publishedAt,
-          JSON.stringify(tags), JSON.stringify(cves), contentHash);
-        count++;
-      } catch {
-        // skip
-      }
-    }
-  });
-
-  insertMany(feed.items || []);
-  console.log(`[OK] ${name}: +${count} articles`);
-  return count;
-}
+let running = false;
 
 async function run() {
-  console.log(`\n[BriefSec RSS Worker] ${new Date().toISOString()}`);
+  if (running) return; // previous run still going (slow feed or NVD)
+  running = true;
+  console.log(`\n[BriefSec worker] ${new Date().toISOString()}`);
   const db = openDatabase();
-  let total = 0;
-  for (const feed of RSS_FEEDS) {
-    total += await ingestFeed(db, feed);
-  }
-
-  // Keep the newest 600 news articles and 250 MSRC advisories. Separate quotas because MSRC
-  // republishes hundreds of advisories at once and would otherwise evict the news.
-  db.prepare(`
-    DELETE FROM articles
-    WHERE id NOT IN (SELECT id FROM articles WHERE source != 'Microsoft MSRC' ORDER BY published_at DESC LIMIT 600)
-      AND id NOT IN (SELECT id FROM articles WHERE source = 'Microsoft MSRC' ORDER BY published_at DESC LIMIT 250)
-  `).run();
-
-  // Pull CVE IDs from the article pages of items whose feed snippet didn't include one
-  if (!process.argv.includes('--no-enrich')) {
-    try {
+  try {
+    await refreshNews(db, { log: true });
+    await refreshCves(db, { log: true });
+    if (!process.argv.includes('--no-enrich')) {
       await enrichPendingArticles(db, { limit: 60, log: true });
-    } catch (err) {
-      console.warn(`[CVE enrich] ${err.message}`);
     }
+  } catch (err) {
+    console.warn(`[Worker] ${err.message}`);
+  } finally {
+    db.close();
+    running = false;
   }
-
-  db.close();
-  console.log(`[Done] Total new: ${total}`);
+  console.log('[Done]');
 }
 
 if (process.argv.includes('--watch')) {
-  run().catch(console.error);
-  const interval = parseInt(process.env.WORKER_INTERVAL_MINUTES || '15', 10) * 60 * 1000;
+  run();
+  const interval = parseInt(process.env.WORKER_INTERVAL_MINUTES || '5', 10) * 60 * 1000;
   console.log(`[Watch] Re-running every ${interval / 60000} minutes...`);
-  setInterval(() => run().catch(console.error), interval);
+  setInterval(run, interval);
 } else {
   // rss-parser leaves keep-alive sockets open (e.g. after a feed times out), which would keep a
   // one-shot run — and the startup seed in start-prod.sh — from ever exiting
-  run().catch(console.error).finally(() => process.exit(0));
+  run().finally(() => process.exit(0));
 }

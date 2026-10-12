@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'BriefSec',
-  description: 'SOC intelligence dashboard: severity triage, CISA KEV tracking, IOC extraction, MITRE ATT&CK mapping, and daily brief export.',
+  description: 'Up-to-date hacking news and CVEs.',
   icons: {
     icon: [{ url: '/favicon.svg', type: 'image/svg+xml' }],
     shortcut: '/favicon.svg',

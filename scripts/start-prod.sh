@@ -6,10 +6,10 @@ DB_DIR=$(dirname "${DATABASE_PATH:-/data/briefsec.sqlite}")
 mkdir -p "$DB_DIR"
 
 echo "[BriefSec] Seeding database on startup..."
-# CVE page lookups are left to the background worker below so Next.js starts sooner
+# Article-page CVE lookups are left to the background worker below so Next.js starts sooner
 node scripts/rss-worker.js --no-enrich
 
-echo "[BriefSec] Starting background RSS worker (every 15 min)..."
+echo "[BriefSec] Starting background worker (news + CVEs every 5 min)..."
 node scripts/rss-worker.js --watch &
 
 echo "[BriefSec] Starting Next.js server..."
