@@ -112,9 +112,15 @@ const TAG_STYLES: Record<string, { bg: string; color: string; border: string }> 
   'Azure AD':        { bg: 'rgba(0,120,212,0.12)',   color: '#90c8f0', border: 'rgba(0,120,212,0.4)' },
   'Splunk':          { bg: 'rgba(107,63,160,0.12)',  color: '#d4a8ff', border: 'rgba(107,63,160,0.4)' },
   'NetScaler':       { bg: 'rgba(0,166,255,0.10)',   color: '#67d4ff', border: 'rgba(0,166,255,0.35)' },
+  'Citrix':          { bg: 'rgba(0,102,204,0.10)',   color: '#60a5fa', border: 'rgba(0,102,204,0.35)' },
   'F5/BIG-IP':       { bg: 'rgba(230,74,25,0.10)',   color: '#ffb08a', border: 'rgba(230,74,25,0.3)' },
   'M365':            { bg: 'rgba(0,120,212,0.08)',   color: '#81b4ea', border: 'rgba(0,120,212,0.3)' },
   'Windows/AD':      { bg: 'rgba(0,164,239,0.10)',   color: '#7dd3fc', border: 'rgba(0,164,239,0.3)' },
+  'Microsoft':       { bg: 'rgba(0,120,212,0.08)',   color: '#7ec8f5', border: 'rgba(0,120,212,0.25)' },
+  'Palo Alto':       { bg: 'rgba(250,166,26,0.10)',  color: '#fbbf24', border: 'rgba(250,166,26,0.35)' },
+  'VMray':           { bg: 'rgba(0,176,137,0.10)',   color: '#34d399', border: 'rgba(0,176,137,0.35)' },
+  'Cisco':           { bg: 'rgba(18,102,165,0.10)',  color: '#7dd3fc', border: 'rgba(18,102,165,0.35)' },
+  'Oracle':          { bg: 'rgba(204,41,0,0.10)',    color: '#fca5a5', border: 'rgba(204,41,0,0.35)' },
   'Financial Sector':{ bg: 'rgba(16,185,129,0.10)',  color: '#34d399', border: 'rgba(16,185,129,0.3)' },
   'Regulatory':      { bg: 'rgba(245,158,11,0.08)',  color: '#fbbf24', border: 'rgba(245,158,11,0.25)' },
 };
@@ -141,7 +147,10 @@ const ATTACK_MAP: Array<{ pattern: RegExp; id: string; name: string }> = [
 
 // ─── Stack Tags & Threat Actors ───────────────────────────────────────────────
 
-const STACK_TAGS = ['Azure AD', 'Splunk', 'NetScaler', 'F5/BIG-IP', 'M365', 'Windows/AD'];
+const STACK_TAGS = ['Azure AD', 'Splunk', 'NetScaler', 'Citrix', 'F5/BIG-IP', 'M365', 'Windows/AD', 'Microsoft', 'Palo Alto', 'VMray', 'Cisco', 'Oracle'];
+
+// Tags for vendors the SOC team uses — CVE articles from these float to the top in PF mode
+const PRIORITY_VENDOR_TAGS = new Set(['Citrix', 'NetScaler', 'Palo Alto', 'Splunk', 'VMray', 'Microsoft', 'Azure AD', 'M365', 'Windows/AD', 'Cisco', 'Oracle']);
 
 const THREAT_ACTORS: Array<{ name: string; regex: RegExp; origin: string; sector: string }> = [
   { name: 'Lazarus Group',      regex: /lazarus|apt.?38|bluenoroff/i,          origin: 'DPRK',        sector: 'Financial / Crypto' },
@@ -881,6 +890,14 @@ export default function BriefSec() {
         return diff !== 0 ? diff : new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime();
       });
     }
+    // PF mode: vendor CVE articles bubble to the top regardless of sort order
+    if (stackFilter) {
+      items = [...items].sort((a, b) => {
+        const aBoost = (a.cves.length > 0 && a.tags.some(t => PRIORITY_VENDOR_TAGS.has(t))) ? 1 : 0;
+        const bBoost = (b.cves.length > 0 && b.tags.some(t => PRIORITY_VENDOR_TAGS.has(t))) ? 1 : 0;
+        return bBoost - aBoost;
+      });
+    }
     return items;
   }, [data, sourceFilter, tagFilter, sevFilter, search, timeFilter, viewMode, savedArticles, sortBy, kevSet2, stackFilter]);
 
@@ -1484,6 +1501,25 @@ export default function BriefSec() {
                 {/* Title */}
                 <h2 className="card-title">
                   <a href={item.link} target="_blank" rel="noopener noreferrer">{item.title}</a>
+                  {item.cves.slice(0, 4).map(cve => (
+                    <a key={cve} className="cve-title-tag"
+                      href={`https://nvd.nist.gov/vuln/detail/${cve}`}
+                      target="_blank" rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}>
+                      {cve}
+                    </a>
+                  ))}
+                  {item.cves.length > 4 && (
+                    <span className="cve-title-tag cve-title-tag--more">+{item.cves.length - 4}</span>
+                  )}
+                  {item.cves.length === 0 &&
+                   stackFilter &&
+                   item.tags.some(t => PRIORITY_VENDOR_TAGS.has(t)) &&
+                   (item.tags.includes('Vulnerability') || item.tags.includes('Zero-Day') || item.tags.includes('CVE')) && (
+                    <span className="cve-title-tag cve-title-tag--unknown" title="CVE ID not available in RSS feed — click Read to see full advisory">
+                      CVE ID in article ↗
+                    </span>
+                  )}
                 </h2>
 
                 {/* CVE badges with CVSS */}

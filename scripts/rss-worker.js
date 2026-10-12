@@ -79,9 +79,15 @@ function detectTags(title, description) {
   if (/azure.?ad|azure.?active.?directory|entra.?id|microsoft.?entra/.test(text)) tags.push('Azure AD');
   if (/\bsplunk\b/.test(text)) tags.push('Splunk');
   if (/netscaler|citrix.*(adc|gateway|ica|bleed)|citrix.*(vuln|exploit|advis|patch)/.test(text)) tags.push('NetScaler');
+  if (/\bcitrix\b/.test(text)) tags.push('Citrix');
   if (/big.?ip|f5.*(vuln|exploit|advis|patch|security)|f5.?labs/.test(text)) tags.push('F5/BIG-IP');
   if (/microsoft.?365|office.?365|\bo365\b|sharepoint.?online|exchange.?online|microsoft.?teams|outlook.?online/.test(text)) tags.push('M365');
   if (/windows.?server|active.?directory|domain.?controller|\bkerberos\b|group.?policy|\bntlm\b/.test(text)) tags.push('Windows/AD');
+  if (/\bmicrosoft\b/.test(text)) tags.push('Microsoft');
+  if (/palo.?alto|pan.?os\b|panorama|cortex.?xdr|prisma.?cloud/.test(text)) tags.push('Palo Alto');
+  if (/\bvmray\b/.test(text)) tags.push('VMray');
+  if (/\bcisco\b/.test(text)) tags.push('Cisco');
+  if (/\boracle\b|weblogic/.test(text)) tags.push('Oracle');
   if (/financial.*(sector|institution|service|attack|fraud|crime)|banking.*(security|threat|fraud)|pci.?dss|\bswift\b.*network|payment.?card.*fraud|financial.?market/.test(text)) tags.push('Financial Sector');
   if (/\bdora\b|digital.?operational.?resilience|\bnis2\b|nis.?2.?directive|financial.*(authorit|regulat)|cyber.?resilience.?act|regulatory.*(framework|compliance|mandate)/.test(text)) tags.push('Regulatory');
   return tags;
@@ -160,8 +166,8 @@ async function ingestFeed(db, feedConfig) {
       const pubDate = item.pubDate || item.isoDate || new Date().toISOString();
       const publishedAt = Math.floor(new Date(pubDate).getTime() / 1000) || Math.floor(Date.now() / 1000);
 
-      const tags = detectTags(title, description);
-      const cves = extractCVEs(`${title} ${description}`);
+      const tags = detectTags(title, content);
+      const cves = extractCVEs(`${title} ${content}`);
       const contentHash = crypto.createHash('sha256')
         .update((title + description).toLowerCase())
         .digest('hex');

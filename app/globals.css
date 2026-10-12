@@ -685,11 +685,43 @@ button { font-family: inherit; cursor: pointer; border: none; outline: none; }
 .card-title {
   font-size: 14px;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1.5;
   color: var(--text);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 6px;
 }
 
-.card-title a:hover { color: var(--accent); }
+.card-title a:first-child { flex: 1 1 auto; }
+.card-title a:first-child:hover { color: var(--accent); }
+
+.cve-title-tag {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  background: rgba(239, 68, 68, 0.13);
+  border: 1px solid rgba(239, 68, 68, 0.38);
+  color: #fca5a5;
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: 'Courier New', monospace;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  text-decoration: none;
+  line-height: 1.6;
+  transition: opacity 0.15s;
+}
+.cve-title-tag:hover { opacity: 0.7; }
+.cve-title-tag--more { cursor: default; opacity: 0.55; }
+.cve-title-tag--unknown {
+  background: rgba(100,116,139,0.12);
+  border-color: rgba(100,116,139,0.3);
+  color: #94a3b8;
+  cursor: default;
+  font-style: italic;
+}
 
 /* CVE badges now link to NVD */
 .cve-badges { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
